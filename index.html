@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="theme-color" content="#0B0F1E" />
+  <title>Vilgot fyller 10 – du är bjuden!</title>
+  <meta name="description" content="Du är bjuden på Vilgots gamingkalas!" />
+  <!-- Körs före allt annat, ES5 med flit (ska fungera även där huvudskriptet inte gör det).
+       1) Klassen "js" låter CSS dölja element som animeras in – utan JS syns allt.
+       2) Nödspärr: har huvudskriptet inte satt "js-ready" inom 4 s tas "js" bort så allt syns.
+       3) Felrapport: alla JS-fel samlas och visas i #debug med ?debug=1. -->
+  <script>
+    (function () {
+      var root = document.documentElement;
+      root.className += " js";
+      var errors = (window.__errors = []);
+      window.addEventListener("error", function (e) {
+        errors.push((e.message || "Okänt fel") + (e.filename ? " @ " + e.filename.split("/").pop() + ":" + e.lineno + ":" + e.colno : ""));
+      }, true);
+      window.addEventListener("unhandledrejection", function (e) {
+        errors.push("Promise: " + (e.reason && e.reason.message ? e.reason.message : String(e.reason)));
+      });
+      setTimeout(function () {
+        if (root.className.indexOf("js-ready") === -1) {
+          root.className = root.className.replace(/\bjs\b/g, "");
+          errors.push("Nödspärr: huvudskriptet blev inte klart inom 4 s – allt visas utan animation");
+        }
+      }, 4000);
+      if (!/[?&]debug=1(&|$)/.test(location.search)) return;
+      setTimeout(function () {
+        var pre = document.getElementById("debug");
+        if (!pre) return;
+        var img = document.querySelector("#hero-frame img");
+        var frame = document.getElementById("hero-frame");
+        // Nyckeln sätts av huvudskriptet (rsvpKey() i main.ts) – samma som det läste
+        var key = window.__rsvpKey;
+        var saved = null, allKeys = [];
+        try {
+          saved = key ? localStorage.getItem(key) : null;
+          for (var i = 0; i < localStorage.length; i++) {
+            var k = localStorage.key(i);
+            if (k && k.indexOf("vilgots-kalas-rsvp") === 0) allKeys.push(k);
+          }
+        } catch (x) { saved = "(localStorage ej åtkomlig)"; }
+        var lines = [
+          "UA: " + navigator.userAgent,
+          "Klasser på <html>: " + root.className,
+          "Hero: src=" + (img && (img.currentSrc || img.src)) + " naturalWidth=" + (img && img.naturalWidth) +
+            " opacity=" + (frame && getComputedStyle(frame).opacity),
+          "OSA-nyckel som lästes: " + (key || "(ingen – huvudskriptet körde inte rsvp-steget)"),
+          "Sparat svar under den nyckeln: " + (saved ? saved.slice(0, 120) : "inget"),
+          "Alla OSA-nycklar i webbläsaren: " + (allKeys.length ? allKeys.join(", ") : "inga"),
+          "Fel (" + errors.length + "):"
+        ].concat(errors.length ? errors : ["(inga)"]);
+        pre.textContent = lines.join("\n");
+        pre.hidden = false;
+      }, 4500);
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <!-- Pixelfonten laddas utan att blockera första renderingen (rubrikerna visas
+       i monospace tills den är klar); noscript-varianten för sidor utan JS -->
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" onload="this.onload=null;this.rel='stylesheet'" />
+  <noscript><link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" /></noscript>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8' shape-rendering='crispEdges'%3E%3Cpath fill='%230B0E17' d='M2 0h4v1H2zM1 1h1v1H1zM6 1h1v1H6zM0 2h1v4H0zM7 2h1v4H7zM1 6h1v1H1zM6 6h1v1H6zM2 7h4v1H2z'/%3E%3Cpath fill='%23FFC83D' d='M2 1h4v1H2zM1 2h6v4H1zM2 6h4v1H2z'/%3E%3Cpath fill='%23FFF2A8' d='M2 2h2v1H2zM2 3h1v2H2z'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <main id="app">
+
+    <!-- TITELSKÄRM -->
+    <section class="act act-intro" id="intro">
+      <div class="sky-bg" aria-hidden="true">
+        <div class="stars-container" id="stars"></div>
+        <svg data-sprite="cloud" class="cloud cloud-1" width="96" height="36"></svg>
+        <svg data-sprite="cloud" class="cloud cloud-2" width="64" height="24"></svg>
+      </div>
+
+      <!-- HUD: liv uppe till vänster, mynt uppe till höger -->
+      <div class="hud">
+        <div class="hud-lives">
+          <button type="button" class="tap-btn hearts-btn" id="btn-hearts" aria-label="Liv: 3 av 3. Tryck för att ta ett liv" data-lives="3">
+            <span class="heart"><svg data-sprite="heart-empty" class="heart-empty" width="27" height="24" aria-hidden="true"></svg><svg data-sprite="heart" class="heart-full" width="27" height="24" aria-hidden="true"></svg></span>
+            <span class="heart"><svg data-sprite="heart-empty" class="heart-empty" width="27" height="24" aria-hidden="true"></svg><svg data-sprite="heart" class="heart-full" width="27" height="24" aria-hidden="true"></svg></span>
+            <span class="heart"><svg data-sprite="heart-empty" class="heart-empty" width="27" height="24" aria-hidden="true"></svg><svg data-sprite="heart" class="heart-full" width="27" height="24" aria-hidden="true"></svg></span>
+          </button>
+          <p class="hud-msg" id="hearts-msg" aria-live="polite"></p>
+        </div>
+        <p class="hud-coins" id="hud-coins">
+          <svg data-sprite="coin" class="hud-coin" width="24" height="24" aria-hidden="true"></svg>
+          <span class="hud-x" aria-hidden="true">×</span><span class="sr-only">Mynt: </span><span id="coin-count">00</span>
+        </p>
+      </div>
+
+      <div class="intro-content">
+        <button type="button" class="tap-btn hero-btn" id="btn-hero" aria-label="Tryck på Vilgot" data-state="0">
+          <span class="hero-frame" id="hero-frame">
+            <picture>
+              <source srcset="vilgot-hero.webp" type="image/webp" />
+              <img src="vilgot-hero.jpg" alt="Vilgot" width="600" height="800" fetchpriority="high" />
+            </picture>
+          </span>
+          <!-- Solglasögon och krona ligger utanför ramen (som klipper) men i samma box; placering i % av ramen -->
+          <span class="hero-accessories" aria-hidden="true">
+            <svg data-sprite="shades" class="accessory shades" id="shades"></svg>
+            <svg data-sprite="crown" class="accessory crown" id="crown"></svg>
+          </span>
+        </button>
+        <h1 class="title" id="main-title">
+          <span class="title-name" id="title-name"></span>
+          <span class="title-age" id="title-age"></span>
+        </h1>
+        <p class="subtitle">...och <span id="invitee">du</span> är bjuden på <strong id="party-kind"></strong></p>
+        <a class="press-start" id="press-start" href="#act-when">Press start</a>
+      </div>
+
+      <!-- Marken: träd och ett block med ett mynt i -->
+      <div class="terrain">
+        <svg data-sprite="tree" class="tree tree-1" width="48" height="56" aria-hidden="true"></svg>
+        <svg data-sprite="tree" class="tree tree-2" width="36" height="42" aria-hidden="true"></svg>
+        <div class="dig-spot">
+          <svg data-sprite="star" class="dig-sparkle" width="9" height="9" aria-hidden="true"></svg>
+          <button type="button" class="tap-btn dig-btn" id="btn-dig" aria-label="Gräv i blocket">
+            <svg data-sprite="dig-block" class="dig-block" width="48" height="48" aria-hidden="true"></svg>
+            <svg data-sprite="crack-1" class="crack crack-1" width="48" height="48" aria-hidden="true"></svg>
+            <svg data-sprite="crack-2" class="crack crack-2" width="48" height="48" aria-hidden="true"></svg>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- NÄR -->
+    <section class="act act-when" id="act-when">
+      <div class="act-inner">
+        <h2 class="act-title reveal">När?</h2>
+        <div class="dialog px reveal" id="when-box">
+          <p class="when-date" id="when-date"></p>
+          <p class="when-time" id="when-time"></p>
+          <p class="when-dresscode" id="when-dresscode"></p>
+        </div>
+        <div class="countdown" id="countdown"></div>
+      </div>
+    </section>
+
+    <!-- VAR -->
+    <section class="act act-where" id="act-where">
+      <div class="act-inner">
+        <h2 class="act-title reveal">Var?</h2>
+        <div class="where-scene reveal" id="where-scene">
+          <button type="button" class="tap-btn sign-btn" id="signpost" aria-controls="address-card" aria-label="Hemma hos oss – visa kartan">
+            <span class="sign-board" id="sign-board"><span id="sign-text"></span></span>
+            <span class="sign-post"></span>
+          </button>
+          <button type="button" class="tap-btn chest-btn" id="btn-chest" aria-label="Öppna skattkistan" data-open="false">
+            <svg data-sprite="chest-closed" class="chest chest-closed" width="64" height="48" aria-hidden="true"></svg>
+            <svg data-sprite="chest-open" class="chest chest-open" width="64" height="48" aria-hidden="true"></svg>
+          </button>
+        </div>
+        <p class="tap-hint" id="tap-hint">Tryck på skylten för kartan</p>
+        <!-- Adressen finns alltid i DOM (och syns utan JS) -->
+        <div class="address-card px" id="address-card">
+          <svg data-sprite="map" class="map-art" width="224" height="96" aria-hidden="true"></svg>
+          <p class="address-street" id="address-street"></p>
+          <p class="address-postal" id="address-postal"></p>
+          <div class="map-buttons">
+            <a class="btn btn-map px" id="btn-google-maps" href="#" target="_blank" rel="noopener noreferrer">Öppna i Google Maps</a>
+            <a class="btn btn-map px" id="btn-apple-maps" href="#" target="_blank" rel="noopener noreferrer">Öppna i Apple Kartor</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- VAD HÄNDER -->
+    <section class="act act-program" id="act-program">
+      <div class="act-inner">
+        <h2 class="act-title reveal">Vad händer?</h2>
+
+        <div class="program-beat reveal" id="beat-gaming">
+          <div class="beat-head">
+            <svg data-sprite="controller" class="beat-icon" width="64" height="36" aria-hidden="true"></svg>
+            <p class="beat-text" id="beat-gaming-text"></p>
+          </div>
+          <div class="photo photo-right px">
+            <picture>
+              <source srcset="vilgot-labb.webp" type="image/webp" />
+              <img src="vilgot-labb.jpg" alt="Vilgot i skyddsglasögon" loading="lazy" width="480" height="600" />
+            </picture>
+          </div>
+        </div>
+
+        <div class="program-beat reveal" id="beat-snacks">
+          <div class="beat-head">
+            <svg data-sprite="snacks" class="beat-icon" width="56" height="32" aria-hidden="true"></svg>
+            <p class="beat-text" id="beat-snacks-text"></p>
+          </div>
+          <div class="photo photo-left px">
+            <picture>
+              <source srcset="vilgot-titt.webp" type="image/webp" />
+              <img src="vilgot-titt.jpg" alt="Vilgot tittar fram" loading="lazy" width="480" height="600" />
+            </picture>
+          </div>
+        </div>
+
+        <p class="status-line reveal" id="beat-tempo-text"></p>
+
+        <!-- Ta med: eget föremål, ska synas tydligt -->
+        <div class="program-beat bring px reveal" id="beat-bring">
+          <p class="bring-label">Ta med</p>
+          <div class="bring-row">
+            <span class="item-slot"><svg data-sprite="tablet" class="bring-icon" width="64" height="44" aria-hidden="true"></svg></span>
+            <p class="bring-text" id="bring-text"></p>
+          </div>
+        </div>
+
+        <p class="extra-info" id="gifts-line"></p>
+        <p class="extra-info" id="contact-line"></p>
+      </div>
+    </section>
+
+    <!-- OSA -->
+    <section class="act act-rsvp" id="act-rsvp">
+      <div class="act-inner">
+        <p class="kicker">OSA</p>
+        <h2 class="act-title rsvp-title">Join game?</h2>
+        <p class="rsvp-deadline" id="rsvp-deadline"></p>
+
+        <!-- Summary state (shown after submission) -->
+        <div class="rsvp-summary px" id="rsvp-summary" hidden>
+          <p id="summary-text"></p>
+          <button class="btn btn-change px" id="btn-change">Ändra svar</button>
+        </div>
+
+        <!-- Form -->
+        <form class="rsvp-form" id="rsvp-form" novalidate>
+          <input type="hidden" name="_subject" id="form-subject" />
+          <input type="text" name="_gotcha" style="display:none" tabindex="-1" autocomplete="off" />
+          <input type="hidden" name="changed" id="form-changed" value="" />
+          <!-- Vilken inbjudan svaret kom från: ?g-namnet, oberoende av namnfältet (sätts i initRSVP) -->
+          <input type="hidden" name="guest" id="form-guest" value="okänd" />
+
+          <div class="form-group">
+            <label for="field-name">Barnets namn (som inbjudan gäller)</label>
+            <input type="text" id="field-name" name="name" required autocomplete="given-name" />
+            <span class="form-error" id="error-name"></span>
+          </div>
+
+          <div class="form-group">
+            <label>Kommer ni?</label>
+            <div class="toggle-buttons" id="toggle-attending">
+              <button type="button" class="btn-toggle px" data-value="ja" id="btn-yes">Ja, vi kommer!</button>
+              <button type="button" class="btn-toggle px" data-value="nej" id="btn-no">Nej, tyvärr</button>
+            </div>
+            <input type="hidden" name="attending" id="field-attending" required />
+            <span class="form-error" id="error-attending"></span>
+          </div>
+
+          <div class="form-group">
+            <label for="field-diet">Allergier eller kostönskemål</label>
+            <textarea id="field-diet" name="diet" rows="2" placeholder="T.ex. nötter, laktos, vegetariskt"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="field-phone">Förälders telefon</label>
+            <input type="tel" id="field-phone" name="phone" autocomplete="tel" />
+          </div>
+
+          <div class="form-group">
+            <label for="field-message">Hälsning eller fråga</label>
+            <textarea id="field-message" name="message" rows="2"></textarea>
+          </div>
+
+          <button type="submit" class="btn btn-submit px" id="btn-submit">
+            <span id="submit-text">Skicka svar</span>
+            <span class="spinner" id="spinner" hidden></span>
+          </button>
+
+          <p class="form-status" id="form-status"></p>
+        </form>
+      </div>
+    </section>
+
+    <!-- HIGH SCORE -->
+    <section class="act act-outro" id="act-outro">
+      <div class="act-inner credits">
+        <h2 class="hs-title credits-line">High score</h2>
+        <ol class="hiscore credits-line">
+          <li class="hs-row hs-top"><span class="hs-rank">1</span><span class="hs-name" id="hs-name"></span><span class="hs-dots" aria-hidden="true"></span><span class="hs-score" id="hs-score"></span></li>
+          <li class="hs-row hs-you"><span class="hs-rank">2</span><span class="hs-name">Du?<span class="hs-cursor" aria-hidden="true">_</span></span><span class="hs-dots" aria-hidden="true"></span><span class="hs-score">???</span></li>
+        </ol>
+        <p class="credits-line credits-big" id="outro-see-you"></p>
+        <div class="outro-controls">
+          <button class="btn-mute px" id="btn-mute" aria-label="Stäng av ljud">
+            <svg id="icon-sound-on" width="24" height="24" viewBox="0 0 12 12" shape-rendering="crispEdges" fill="currentColor" aria-hidden="true">
+              <path d="M1 4h2v4H1zM3 3h1v6H3zM4 2h1v8H4zM5 1h1v10H5zM8 4h1v4H8zM10 2h1v8h-1z"/>
+            </svg>
+            <svg id="icon-sound-off" width="24" height="24" viewBox="0 0 12 12" shape-rendering="crispEdges" fill="currentColor" aria-hidden="true" hidden>
+              <path d="M1 4h2v4H1zM3 3h1v6H3zM4 2h1v8H4zM5 1h1v10H5zM7 4h1v1H7zM8 5h1v1H8zM9 6h1v1H9zM10 7h1v1h-1zM10 4h1v1h-1zM9 5h1v1H9zM8 6h1v1H8zM7 7h1v1H7z"/>
+            </svg>
+          </button>
+          <a href="#intro" class="btn-top">Till start</a>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <pre id="debug" class="debug" hidden></pre>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+node_modules/
+dist/
+qa/*
+!qa/verify.spec.ts
+test-results/
+CC-PROMPT.md
+assets/sound/
+.DS_Store
