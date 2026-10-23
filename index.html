@@ -225,10 +225,23 @@
       <div class="act-inner">
         <h2 class="act-title reveal">Bonus level</h2>
         <p class="bonus-hint reveal">Tryck på spelet för att starta. Tryck igen för att hoppa över buskar, block och fåglar. Tre krockar så är det game over.</p>
-        <div class="game px" id="game" tabindex="0" role="button" aria-label="Minispel: tryck för att starta, tryck igen för att hoppa" aria-describedby="game-status" data-state="idle">
-          <canvas id="game-canvas" width="192" height="96"></canvas>
+        <div class="game-wrap">
+          <div class="game px" id="game" tabindex="0" role="button" aria-label="Minispel: tryck för att starta, tryck igen för att hoppa" aria-describedby="game-status" data-state="idle">
+            <canvas id="game-canvas" width="192" height="96"></canvas>
+          </div>
+          <!-- Fråga vid nytt rekord (src/leaderboard.ts). Inget postas utan Ja. -->
+          <div class="game-panel" id="game-panel" role="dialog" aria-labelledby="game-panel-title" hidden>
+            <p class="game-panel-title" id="game-panel-title">Nytt rekord! Posta på leaderboarden?</p>
+            <div class="panel-buttons">
+              <button type="button" class="btn btn-post px" id="btn-post-yes">Ja!</button>
+              <button type="button" class="btn btn-post no px" id="btn-post-no">Nej tack</button>
+            </div>
+            <label class="panel-always"><input type="checkbox" id="post-always" /> Posta alltid</label>
+          </div>
         </div>
         <p class="sr-only" id="game-status" aria-live="polite"></p>
+        <!-- Topplistan på game over-skärmen som text (canvasen syns inte för skärmläsare) -->
+        <p class="sr-only" id="board-status" aria-live="polite"></p>
         <noscript><p class="bonus-hint">Spelet behöver JavaScript.</p></noscript>
       </div>
     </section>

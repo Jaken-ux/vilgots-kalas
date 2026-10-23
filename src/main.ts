@@ -1,6 +1,7 @@
 import { content, staticText, staticHref, seeYouText } from "./content";
 import { spriteSvg } from "./sprites";
 import { initGame, bestScore } from "./game";
+import { initLeaderboard } from "./leaderboard";
 import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import confetti from "canvas-confetti";
@@ -733,11 +734,12 @@ function initHearts() {
 // ===== KONFETTI OCH LEVEL UP =====
 const PIXEL_COLORS = ["#5BC236", "#8B5A2B", "#5EC8F2", "#FF3EB5", "#FFC83D"];
 
-function showLevelUp() {
+// Stor pixeltext mitt på skärmen: "LEVEL UP!" vid OSA-ja, "NEW HIGH SCORE!" vid ny etta
+function showLevelUp(text = "LEVEL UP!") {
   const el = document.createElement("div");
-  el.className = "levelup";
+  el.className = text.length > 10 ? "levelup long" : "levelup";
   el.setAttribute("aria-hidden", "true");
-  el.textContent = "LEVEL UP!";
+  el.textContent = text;
   document.body.appendChild(el);
   if (reducedMotion) {
     gsap.delayedCall(1.5, () => el.remove());
@@ -986,9 +988,24 @@ function showRecord(n: number) {
   $("#hs-record-row").hidden = false;
 }
 
+// Topplistan (src/leaderboard.ts) laddar Firebase vid första spelstart eller när
+// high score-delen syns – aldrig vid sidladdning
 function initBonus() {
   if (bestScore() > 0) showRecord(bestScore());
-  initGame($("#game"), (s) => playSound(s), showRecord);
+  const board = initLeaderboard({
+    guest: guestName(),
+    play: (s) => playSound(s),
+    toast: showLevelUp,
+    localBest: bestScore,
+  });
+  const game = initGame($("#game"), (s) => playSound(s), {
+    onStart: board.connect,
+    onOver: (score, best) => {
+      if (best) showRecord(score);
+      board.over(score);
+    },
+  });
+  board.attach(game);
 }
 
 // Varje steg körs för sig: ett fel i t.ex. ljud eller konfetti ska inte stoppa

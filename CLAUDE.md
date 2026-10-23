@@ -3,7 +3,8 @@
 Läsordning för en ny session: README.md → DECISIONS.md (beslutslogg, nyast överst) → Kända fällor nedan.
 
 - Projektet är en kopia av Livias kalas med ny design. Poster i DECISIONS.md före 2026-10-23 kommer därifrån och förklarar den ärvda koden (OSA-logik, robusthet, jank-skydd).
-- En push till `main` deployar direkt till GitHub Pages (`https://<användare>.github.io/vilgots-kalas/`) via `.github/workflows/deploy.yml`.
+- En push till `main` deployar direkt till https://jaken-ux.github.io/vilgots-kalas/ via `.github/workflows/deploy.yml`. Repot heter `Jaken-ux/Vilgots-Kalas`, men Pages-adressen är i gemener och matchar `base` i `vite.config.ts`.
+- **Firebase-databasen är produktion.** Kör aldrig `npm run rules:check` själv, eftersom det skriver i den riktiga databasen. Jacob kör det. Tester får aldrig nå Firebase (se Kända fällor).
 - **Commit och push:** slutar en instruktion med "commita X och pusha" är det Jacobs godkännande, och det gäller även inklistrade instruktioner. Fråga inte igen: committa med det angivna meddelandet och pusha när ändringen är verifierad. Går en verifiering fel (tester, bygge, avvikelse) gäller fortfarande stopp och fråga. Säger Jacob "pusha inte" publicerar han själv.
 - I `qa/` spåras bara testsviten `qa/verify.spec.ts`. Rapport, skärmdumpar och Lighthouse-data är gitignorerade och finns bara lokalt. Kör sviten med `npm run build && npx playwright test`.
 - Ingen grafik, inga figurer eller blockmönster från riktiga spel (Minecraft, Roblox m.fl.). Ritas ny pixelgrafik ska den vara egen och generisk, i `src/sprites.ts`.
@@ -29,3 +30,7 @@ Läsordning för en ny session: README.md → DECISIONS.md (beslutslogg, nyast �
 - **Ett test som går igenom direkt ska ha en negativ kontroll.** No-scroll-testet för minispelet kördes med touch-action och `preventDefault` avstängda: då scrollade samma svep 378 px. Testet fångar alltså felet.
 - **Mät JS-storlek som den levereras.** esbuild skriver å/ä/ö som `\xF6` (4 byte) som standard, men Vite-bygget levererar UTF-8. Mät med `--charset=utf8`.
 - **Slumpade spel: kräv inte i ett tidsbegränsat test att en viss slumpad sak ska förekomma.** Att en viss dykvariant syns under 60 s var falskt i ~2 % av körningarna. Täck varje variant deterministiskt (fysiktestet mot `jumpWindow`/`minGap`) och kräv bara det som nästan säkert inträffar i bottestet.
+- **Tester får aldrig nå Firebase.** `beforeEach` i `qa/verify.spec.ts` stoppar all HTTP och alla websocketar mot Firebase. Ett test som skapar en egen `browser.newContext()` måste göra detsamma (`context.route` och `context.routeWebSocket`). Webbläsarens "Failed to load resource" för de stoppade anropen filtreras bort i `trackErrors`, men bara när källan är en Firebase-adress.
+- **Mät tillgänglig bredd på rätt element.** När spelet lades i `.game-wrap` (som har innehållets bredd) mätte det sin egen bredd, och skalan låste sig på minsta möjliga (192 px i stället för 320). Storlekstestet missade det eftersom det bara kontrollerade att skalan var ett heltal. Testa att saken fyller sin plats, inte bara att den har rätt form.
+- **Namn från databasen i pixelfonten:** versalt Å/Ä/Ö ("Åsa" lästes som "Asa"). `pixelSafe()` i src/leaderboard.ts skriver sådana namn med gemener. Använd den för all text i pixelfonten som kommer utifrån.
+- **Realtime Database-regler: `.validate` körs inte vid radering.** Ett skydd mot radering måste ligga i `.write` (`newData.exists()`), annars kan vem som helst tömma en nod som bara har `.validate`-regler.

@@ -960,6 +960,72 @@ h1, h2, .act-title {
   touch-action: none;
 }
 
+/* Spelytan och frågan om att posta ligger i samma box. Frågan är ett syskon
+   till #game (inte ett barn), så att dess knappar inte är nästlade i spelets
+   knapp och tryck på dem inte når spelet. */
+.game-wrap {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.game-panel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  min-height: 100%;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.8rem;
+  padding: 0.8rem;
+  background: rgba(11, 15, 30, 0.94);
+  box-shadow: 0 0 0 4px var(--neon);
+  text-align: center;
+}
+
+.game-panel-title {
+  font-family: var(--font-pixel);
+  font-size: 0.6rem;
+  line-height: 1.7;
+  color: var(--gold);
+}
+
+.panel-buttons {
+  display: flex;
+  gap: 1rem;
+}
+
+.btn-post {
+  --frame: var(--grass);
+  background: #1D4A14;
+  color: #FFFFFF;
+  padding: 0.6rem 0.9rem;
+}
+
+.btn-post.no {
+  --frame: var(--line);
+  background: var(--panel);
+}
+
+.panel-always {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.panel-always input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--neon);
+}
+
 .game:focus-visible {
   --frame: var(--neon);
 }
@@ -1199,6 +1265,11 @@ h1, h2, .act-title {
   pointer-events: none;
 }
 
+/* Längre text (NEW HIGH SCORE!) får plats på en smal skärm */
+.levelup.long {
+  font-size: min(2rem, 5.8vw);
+}
+
 /* ===== HIGH SCORE ===== */
 .act-outro {
   background: #05070D;
@@ -1263,6 +1334,20 @@ h1, h2, .act-title {
 
 .hs-top {
   color: var(--gold);
+}
+
+/* Namn i gemener/versaler som de stavas: versalt Å/Ä/Ö blir fel i pixelfonten */
+.hs-name {
+  text-transform: none;
+}
+
+/* Egen rad i den delade topplistan */
+.hs-me {
+  color: var(--neon);
+}
+
+.hs-me .hs-name::after {
+  content: " ◀";
 }
 
 /* Rekordet från minispelet, direkt under Vilgot */

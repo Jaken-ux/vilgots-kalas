@@ -138,7 +138,16 @@ export function bestScore(): number {
   }
 }
 
-export function initGame(el: HTMLElement, play: (s: GameSound) => void, onBest: (n: number) => void) {
+// Krokar mot resten av sidan: onStart vid varje spelstart, onOver vid game over
+// (poäng, och om det är nytt rekord i den här webbläsaren)
+export interface GameHooks {
+  onStart(): void;
+  onOver(score: number, best: boolean): void;
+}
+// Rader under poängen på game over-skärmen: [text, färg]
+export type InfoLine = [string, string];
+
+export function initGame(el: HTMLElement, play: (s: GameSound) => void, hooks: GameHooks) {
   const canvas = el.querySelector("canvas")!;
   const status = document.getElementById("game-status");
   const ctx = canvas.getContext("2d")!;
@@ -165,6 +174,8 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, onBest: 
   let lock = 0; // ingen omstart direkt efter game over (ett hopptryck ska inte starta om)
   let jumps = 0;
   let down: { x: number; y: number; t: number } | null = null;
+  let info: InfoLine[] = []; // topplistan på game over-skärmen
+  let held = false; // en fråga visas ovanpå spelet: ingen omstart
 
   const score = () => Math.floor(dist / 10);
 
@@ -181,7 +192,8 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, onBest: 
   // Heltalsskala i enhetspixlar som ryms i föräldern
   const resize = () => {
     const dpr = window.devicePixelRatio || 1;
-    const room = (el.parentElement?.clientWidth || W) - 8; // minus pixelramen
+    // Sektionens innerbredd – inte närmaste förälder, som (.game-wrap) är lika bred som spelet
+    const room = ((el.closest(".act-inner") ?? el.parentElement)?.clientWidth || W) - 8; // minus pixelramen
     k = Math.max(1, Math.floor((room * dpr) / W));
     canvas.width = W * k;
     canvas.height = H * k;
@@ -241,6 +253,12 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, onBest: 
     } else if (state === "pause") {
       text("Paus", W / 2, 34, PALETTE.b);
       text("Tryck = fortsätt", W / 2, 50, PALETTE.w);
+    } else if (state === "over" && info.length) {
+      // Med topplista: tätare rader, max 5 under poängen
+      text("GAME OVER", W / 2, 14, PALETTE.r);
+      text(`Poäng: ${score()}`, W / 2, 24, PALETTE.y);
+      info.slice(0, 5).forEach(([t, c], i) => text(t, W / 2, 35 + i * 9, c));
+      text("Tryck = spela igen", W / 2, 84, PALETTE.w);
     } else if (state === "over") {
       text("GAME OVER", W / 2, 22, PALETTE.r);
       text(`Poäng: ${score()}`, W / 2, 36, PALETTE.y);
@@ -328,6 +346,8 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, onBest: 
     lives = LIVES;
     inv = 0;
     obs = [];
+    info = [];
+    hooks.onStart();
     say("Tryck för att hoppa.");
     run();
   };
@@ -346,14 +366,15 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, onBest: 
     state = "over";
     lock = performance.now() + 700;
     const s = score();
-    if (s > bestScore()) {
+    const best = s > bestScore();
+    if (best) {
       try {
         localStorage.setItem(BEST_KEY, String(s));
       } catch {
         // Privat läge m.m. – rekordet sparas inte
       }
-      onBest(s);
     }
+    hooks.onOver(s, best);
     play("gameover");
     say(`Game over. Poäng ${s}. Tryck för att spela igen.`);
   }
@@ -369,6 +390,7 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, onBest: 
 
   // Ett tryck utanför spelet (start, fortsätt, spela igen)
   const press = () => {
+    if (held) return;
     if (state === "idle" || (state === "over" && performance.now() > lock)) start();
     else if (state === "pause") run();
   };
@@ -417,4 +439,13 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, onBest: 
   document.fonts?.addEventListener("loadingdone", () => state !== "run" && draw());
   resize();
   sync();
+  return {
+    info(lines: InfoLine[]) {
+      info = lines;
+      if (state === "over") draw();
+    },
+    hold(on: boolean) {
+      held = on;
+    },
+  };
 }

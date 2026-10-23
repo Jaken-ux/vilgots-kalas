@@ -50,7 +50,7 @@ Beskärningen står i skriptet. Ändras porträttets beskärning måste solglas�
 
 ## Minispelet (Bonus level)
 
-`src/game.ts`, utan bibliotek, under 6,5 kB (6,2 kB minifierat, 3,1 kB gzip; mätt med esbuild `--charset=utf8`, som bygget levererar). Spelet räknar i spelpixlar (192×96). Canvasen får bredden 192·k *enhetspixlar*, med k som heltal, och ritar med `ctx.scale(k)`, så varje spelpixel blir exakt k×k skärmpixlar.
+`src/game.ts`, utan bibliotek, under 6,5 kB (6 473 B minifierat; mätt med esbuild `--charset=utf8`, som bygget levererar). Marginalen är bara 27 B. Spelet räknar i spelpixlar (192×96). Canvasen får bredden 192·k *enhetspixlar*, med k som heltal, och ritar med `ctx.scale(k)`, så varje spelpixel blir exakt k×k skärmpixlar.
 
 - **Start:** spelet startar bara på ett riktigt tryck (eller Mellanslag/Enter), aldrig av scroll. I viloläge släpps scrollgester igenom (`touch-action: pan-y`). Under spel äts all touch (`.playing` → `touch-action: none` + `preventDefault`), så ett hopp aldrig scrollar sidan.
 - **Loop:** körs med `requestAnimationFrame` bara under spel. Spelet pausas när det är mindre än 30 % synligt eller fliken döljs, och fortsätter bara på tryck.
@@ -59,6 +59,52 @@ Beskärningen står i skriptet. Ändras porträttets beskärning måste solglas�
 - **Rättvisa:** `jumpWindow()` räknar ut inom vilket avstånd ett avstamp klarar ett hinder vid aktuell fart. `minGap()` räknar ut det kortaste avstånd mellan två hinder som går att klara, och `nextGap()` slumpar aldrig under det. Testsviten låter en bot som hoppar mitt i fönstret spela 60 s utan krock, och en bot som aldrig hoppar ska dö inom 15 s.
 - **Rekord:** bästa poäng sparas per webbläsare (inte per gäst) i `localStorage` under `vilgots-kalas-best`, och rensas inte av `?reset=1`.
 - **Testkrokar:** `#game` har `data-state` (idle/run/pause/over), `data-lives`, `data-score` och `data-jumps`. Finns `window.__gameHook` när spelet startar får den läsa höjd, hinder och fart (används av botarna).
+
+## Topplistan (Firebase)
+
+Minispelet har en delad topplista i Firebase Realtime Database under `/scores/<gästnamn i gemener>` = `{ name, score, updatedAt }`. Koden ligger i `src/leaderboard.ts` (logik och visning) och `src/firebase-backend.ts` (Firebase-anropen och konfigurationen, som är publik by design).
+
+- **Bara opt-in.** Inget postas utan att gästen trycker "Ja!" i frågan "Nytt rekord! Posta på leaderboarden?", eller tidigare har kryssat "Posta alltid". Det valet sparas per gäst i `localStorage` (`vilgots-kalas-autopost:<gäst>`).
+- **Identitet.** Gästens identitet är `?g`-namnet, men bara om det finns i `guests` i `src/content.ts` (gemener jämförs). Utan giltigt `?g` fungerar spelet som förut med lokalt rekord, och game over-skärmen visar "Öppna din egen länk för att hamna på listan".
+- **När frågan visas.** Frågan kommer när poängen slår gästens plats på listan och är högst hittills i sessionen. Ett nej frågas alltså inte om igen för en lägre poäng.
+- **Topplistan i high score-delen** är levande: topp 10, egen rad markerad och egen placering under om den är längre ner. Utan poster står den statiska listan kvar. Tar någon förstaplatsen spelas en fanfar och "NEW HIGH SCORE!" visas.
+- **På game over-skärmen** visas topp 3 och den egna placeringen.
+- **Laddning.** Firebase laddas först vid första spelstart eller när high score-delen syns, aldrig vid sidladdning. Firebase-chunken är 223,5 kB (49,5 kB gzip), och huvudbundlen växte med 5,6 kB.
+- **Fel.** Svarar Firebase inte inom 5 s, eller nekar, visas det lokala rekordet. Inget kraschar.
+
+### Databasreglerna – gör om varje gång `guests` ändras
+
+1. Kör `npm run rules`. Skriptet läser `guests` och skriver om `database.rules.json` (kräver Node 22.18 eller senare).
+2. Öppna [Firebase-konsolen](https://console.firebase.google.com/) → projektet **vilgots-kalas** → **Build → Realtime Database** → fliken **Rules**.
+3. Markera allt i redigeraren och ta bort det. Klistra in hela innehållet i `database.rules.json`.
+4. Klicka **Publish**.
+5. Committa den nya `database.rules.json` tillsammans med ändringen i `content.ts`.
+
+Reglerna:
+- Alla får läsa `/scores`.
+- Skrivning bara till nycklar i gästlistan, och aldrig radering.
+- `score` ska vara ett heltal 0–99999 och högre än den sparade poängen.
+- `name` ska vara samma som nyckeln (gemener jämförs).
+- `updatedAt` ska vara serverns tid.
+- Inga andra fält.
+
+### Kontrollera reglerna efter Publish
+
+```bash
+npm run rules:check
+```
+
+Skriptet skriver via REST till den **riktiga** databasen under `/scores/vilgot`.
+
+**Kontrollerna** (a)–(f): giltig poäng och högre poäng ska gå igenom. Lägre poäng, okänt namn, fel typ, för hög poäng, decimaltal, fel namn, fel tidsstämpel, extra fält och anonym radering ska nekas. Läsning ska gå.
+
+**Om Vilgot redan har en poäng** avbryter skriptet utan att skriva.
+
+**Testposten tas bort så här:** reglerna förbjuder radering, så skriptet kan inte ta bort testposten (poäng 2) utan nyckel. Välj ett av två sätt:
+- Sätt `FIREBASE_DB_SECRET` före kommandot (`FIREBASE_DB_SECRET=… npm run rules:check`). Hemligheten hittar du i **Projektinställningar → Service accounts → Database secrets**. Lägg den aldrig i repot.
+- Ta bort `scores/vilgot` för hand under fliken **Data**.
+
+Skriptet avslutar med felkod om någon kontroll ger fel resultat.
 
 ## Ljud
 
@@ -89,7 +135,7 @@ npm run build
 npx playwright test
 ```
 
-Sviten (`qa/verify.spec.ts`) startar `npm run preview` själv. Alla anrop till Formspree fångas och besvaras med ett fejkat svar, så inga riktiga OSA-svar skickas. Skärmdumpar och Lighthouse-data hamnar i `qa/` (gitignorerade).
+Sviten (`qa/verify.spec.ts`) startar `npm run preview` själv. Alla anrop till Formspree fångas och besvaras med ett fejkat svar, så inga riktiga OSA-svar skickas. All trafik mot Firebase (HTTP och websocket) stoppas, och topplistan testas mot en låtsasdatabas (`window.__leaderboardBackend`). Skärmdumpar och Lighthouse-data hamnar i `qa/` (gitignorerade).
 
 ## Deploya till GitHub Pages
 
@@ -111,4 +157,5 @@ Telefonnumret i `content.party.contact` blir publikt på ett publikt repo och sa
 - **canvas-confetti**: fyrkantig pixelkonfetti vid OSA-ja
 - **Web Audio API**: syntetiserade 8-bitarsljud
 - **Formspree**: formulärbackend (OSA)
+- **Firebase Realtime Database** (modular SDK, `firebase/app` + `firebase/database`): minispelets topplista, laddas vid behov
 - **Google Fonts (Press Start 2P)**: bara för rubriker och spel-UI. Brödtexten använder systemfont

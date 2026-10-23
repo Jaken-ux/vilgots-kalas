@@ -3,6 +3,9 @@ import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { KINDS, jumpWindow, minGap, nextGap } from "../src/game";
+import { ranking, guestIdentity, pixelSafe } from "../src/leaderboard";
+// @ts-expect-error – .mjs utan typer
+import { buildRules } from "../scripts/gen-rules.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,8 +16,21 @@ type Page = import("@playwright/test").Page;
 // Inga riktiga anrop till Formspree från tester – allt mot formspree.io
 // fångas på context-nivå och besvaras med ett fejkat 200 {"ok":true}.
 let formspreeCalls = 0;
+// Firebase nås aldrig från tester: all HTTP och alla websocketar mot databasen
+// stoppas. Topplistan testas mot en låtsasdatabas (window.__leaderboardBackend).
+const FIREBASE = /firebasedatabase\.app|firebaseio\.com|firebaseinstallations|firebase\.googleapis\.com/;
+let firebaseCalls = 0;
 test.beforeEach(async ({ context }) => {
   formspreeCalls = 0;
+  firebaseCalls = 0;
+  await context.route(FIREBASE, (route) => {
+    firebaseCalls++;
+    return route.abort();
+  });
+  await context.routeWebSocket(FIREBASE, (ws) => {
+    firebaseCalls++;
+    ws.close();
+  });
   await context.route(/formspree\.io/, (route) => {
     formspreeCalls++;
     return route.fulfill({
@@ -25,11 +41,13 @@ test.beforeEach(async ({ context }) => {
   });
 });
 
+// Konsolfel och okastade fel. Undantag: webbläsarens "Failed to load resource"
+// för Firebase-anrop som testerna själva blockerar (beforeEach) – de är inte fel i sidan.
 const trackErrors = (page: Page) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => {
-    if (m.type() === "error") errors.push(m.text());
+    if (m.type() === "error" && !FIREBASE.test(m.location().url)) errors.push(`${m.text()} @ ${m.location().url}`);
   });
   return errors;
 };
@@ -1019,7 +1037,10 @@ test.describe("Bonus level (minispel)", () => {
     expect(await framesIn(500)).toBe(0);
   });
 
-  test("canvas is pixel-perfect: integer scale in device pixels, pixelated", async ({ page }) => {
+  test("canvas is pixel-perfect: integer scale in device pixels, pixelated", async ({ browser }) => {
+    // Pixelkvot 3 som en iPhone: 350 px innerbredd → skala 5 → 320 css-px
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true });
+    const page = await ctx.newPage();
     await openGame(page);
     const m = await page.$eval("#game-canvas", (c) => ({
       w: (c as HTMLCanvasElement).width,
@@ -1029,9 +1050,14 @@ test.describe("Bonus level (minispel)", () => {
       rendering: getComputedStyle(c).imageRendering,
     }));
     expect(m.w % 192).toBe(0);
+    // Spelet fyller sin plats: största heltalsskalan som ryms i sektionen
+    const room = await page.$eval("#act-bonus .act-inner", (e) => e.clientWidth - 8);
+    expect(m.w).toBe(192 * Math.floor((room * m.dpr) / 192));
     expect(m.h).toBe(m.w / 2);
     expect(Math.round(m.css * m.dpr)).toBe(m.w); // 1 canvaspixel = 1 enhetspixel
     expect(m.rendering).toBe("pixelated");
+    expect(m.css).toBe(320);
+    await ctx.close();
   });
 
   test("keyboard: Space starts and jumps without scrolling the page", async ({ page }) => {
@@ -1135,5 +1161,277 @@ test.describe("Bonus level: svårighet och rättvisa", () => {
     await expect.poll(() => page.getAttribute("#game", "data-state"), { timeout: 15000, intervals: [250] }).toBe("over");
     expect(Date.now() - t0).toBeLessThan(15000);
     expect(await page.getAttribute("#game", "data-jumps")).toBe("0");
+  });
+});
+
+test.describe("Topplista (Firebase mockad)", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  type S = Record<string, { name: string; score: number; updatedAt?: number }>;
+  // Låtsasdatabas i sidan: __writes = alla försök att posta, __pushScores =
+  // simulera att någon annan postar. fail: "listen" nekar läsning, "post" nekar skrivning.
+  const fakeBoard = (page: Page, initial: S = {}, fail?: "listen" | "post") =>
+    page.addInitScript(
+      ({ initial, fail }) => {
+        const w = window as any;
+        w.__writes = [];
+        w.__sfx = [];
+        w.__scores = initial;
+        let cb: ((s: unknown) => void) | null = null;
+        const copy = () => JSON.parse(JSON.stringify(w.__scores));
+        w.__pushScores = (s: S) => {
+          w.__scores = s;
+          cb?.(copy());
+        };
+        w.__leaderboardBackend = {
+          listen(onData: (s: unknown) => void, onError: (e: unknown) => void) {
+            if (fail === "listen") return void setTimeout(() => onError(new Error("permission_denied")), 50);
+            cb = onData;
+            setTimeout(() => onData(copy()), 30);
+          },
+          async post(key: string, e: { name: string; score: number }) {
+            w.__writes.push({ key, ...e });
+            if (fail === "post") throw new Error("permission_denied");
+            const cur = w.__scores[key];
+            if (cur && cur.score >= e.score) return false;
+            w.__scores = { ...w.__scores, [key]: { ...e, updatedAt: Date.now() } };
+            cb?.(copy());
+            return true;
+          },
+        };
+      },
+      { initial, fail }
+    );
+
+  const writes = (page: Page) => page.evaluate(() => (window as any).__writes as { key: string; score: number }[]);
+  const panel = (page: Page) => page.locator("#game-panel");
+
+  // Spela en omgång utan att hoppa (game over efter ~6 s) och returnera poängen
+  const playToGameOver = async (page: Page, url: string) => {
+    await page.goto(url);
+    await page.waitForLoadState("networkidle");
+    await page.locator("#game").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(1500); // smooth scroll klar
+    await page.locator("#game").tap();
+    await expect.poll(() => page.getAttribute("#game", "data-state"), { timeout: 20000 }).toBe("over");
+    return Number(await page.getAttribute("#game", "data-score"));
+  };
+
+  test("pure logic: identity only for listed guests, ranking order, rules only for listed keys", () => {
+    expect(guestIdentity("vilgot")).toEqual({ key: "vilgot", name: "Vilgot" });
+    expect(guestIdentity("VILGOT ")).toEqual({ key: "vilgot", name: "Vilgot" });
+    expect(guestIdentity("Emma")).toBeNull();
+    expect(guestIdentity("")).toBeNull();
+
+    // Högst först; lika poäng: den som kom dit först; sedan nyckel
+    const rows = ranking({
+      c: { name: "C", score: 300, updatedAt: 5 },
+      vilgot: { name: "vilgot", score: 900, updatedAt: 9 },
+      a: { name: "A", score: 300, updatedAt: 2 },
+      b: { name: "B", score: 300, updatedAt: 2 },
+      d: { name: "D", score: 1200, updatedAt: 1 },
+    });
+    expect(rows.map((r) => [r.rank, r.key, r.score])).toEqual([
+      [1, "d", 1200], [2, "vilgot", 900], [3, "a", 300], [4, "b", 300], [5, "c", 300],
+    ]);
+    expect(rows[1].name).toBe("Vilgot"); // stavning från gästlistan
+    expect(pixelSafe("Åsa")).toBe("åsa");
+    expect(pixelSafe("Vilgot")).toBe("Vilgot");
+    expect(ranking(null)).toEqual([]);
+
+    const r = buildRules(["Vilgot"]).rules.scores.$name;
+    expect(r[".write"]).toBe("($name === 'vilgot') && newData.exists()");
+    expect(r[".write"]).not.toContain("emma");
+    // Den incheckade filen ska vara genererad från nuvarande gästlista
+    const file = JSON.parse(fs.readFileSync(path.join(QA_DIR, "..", "database.rules.json"), "utf8"));
+    expect(file).toEqual(buildRules(["Vilgot"]));
+  });
+
+  test("Firebase is not loaded at page load – only at first game start", async ({ page }) => {
+    const chunks: string[] = [];
+    page.on("request", (r) => r.url().includes("firebase-backend") && chunks.push(r.url()));
+    await page.goto("/");
+    await page.waitForLoadState("networkidle");
+    await page.locator("#act-program").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(800);
+    expect(chunks).toEqual([]);
+    await page.locator("#game").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(1500);
+    await page.locator("#game").tap();
+    await expect.poll(() => chunks.length).toBe(1);
+  });
+
+  test("Firebase is also loaded when the high score section comes into view", async ({ page }) => {
+    const chunks: string[] = [];
+    page.on("request", (r) => r.url().includes("firebase-backend") && chunks.push(r.url()));
+    await page.goto("/");
+    await page.waitForLoadState("networkidle");
+    expect(chunks).toEqual([]);
+    await page.locator("#act-outro").scrollIntoViewIfNeeded();
+    await expect.poll(() => chunks.length).toBe(1);
+  });
+
+  test("new record + 'Nej tack' → nothing is written", async ({ page }) => {
+    await fakeBoard(page, {});
+    await playToGameOver(page, "/?g=Vilgot");
+    await expect(panel(page)).toBeVisible();
+    await expect(panel(page)).toContainText("Nytt rekord! Posta på leaderboarden?");
+    await page.screenshot({ path: path.join(QA_DIR, "screenshot-board-prompt.png") });
+    // Spelet startar inte om bakom frågan (Enter till spelytan, inte till Ja-knappen)
+    await page.waitForTimeout(800); // förbi omstartsspärren
+    await page.locator("#game").dispatchEvent("keydown", { key: "Enter" });
+    expect(await page.getAttribute("#game", "data-state")).toBe("over");
+    await page.locator("#btn-post-no").tap();
+    await expect(panel(page)).toBeHidden();
+    await page.waitForTimeout(500);
+    expect(await writes(page)).toEqual([]);
+    expect(firebaseCalls).toBe(0);
+  });
+
+  test("'Ja!' writes the score; never lowers a higher score on the list", async ({ page }) => {
+    await fakeBoard(page, { vilgot: { name: "Vilgot", score: 1, updatedAt: 1 } });
+    const score = await playToGameOver(page, "/?g=Vilgot");
+    expect(score).toBeGreaterThan(1);
+    await expect(panel(page)).toBeVisible();
+    // Under tiden postar en annan enhet ett högre värde för samma gäst
+    await page.evaluate(() => (window as any).__pushScores({ vilgot: { name: "Vilgot", score: 99999, updatedAt: 2 } }));
+    await page.locator("#btn-post-yes").tap();
+    await expect.poll(() => writes(page)).toEqual([{ key: "vilgot", name: "Vilgot", score }]);
+    // Försöket gjordes, men den högre poängen ligger kvar
+    expect(await page.evaluate(() => (window as any).__scores.vilgot.score)).toBe(99999);
+
+    // Ingen fråga alls när poängen inte slår gästens plats på listan
+    const page2 = await page.context().newPage();
+    await fakeBoard(page2, { vilgot: { name: "Vilgot", score: 99999, updatedAt: 1 } });
+    await playToGameOver(page2, "/?g=Vilgot");
+    await expect(page2.locator("#board-status")).toContainText("Du: plats 1 (99999)");
+    await expect(panel(page2)).toBeHidden();
+    expect(await writes(page2)).toEqual([]);
+  });
+
+  test("'Ja!' writes when higher, the list updates and shows top 3 + own place in the game", async ({ page }) => {
+    await fakeBoard(page, {
+      a: { name: "Anna", score: 5000, updatedAt: 1 },
+      b: { name: "Bo", score: 3, updatedAt: 1 },
+    });
+    const score = await playToGameOver(page, "/?g=Vilgot");
+    await page.locator("#btn-post-yes").tap();
+    await expect.poll(() => writes(page)).toEqual([{ key: "vilgot", name: "Vilgot", score }]);
+    await expect(page.locator("#board-status")).toContainText(`1. Anna`);
+    await expect(page.locator("#board-status")).toContainText(`Du: plats 2 (${score})`);
+    await page.waitForTimeout(300);
+    await page.locator(".game-wrap").screenshot({ path: path.join(QA_DIR, "screenshot-board-gameover.png") });
+
+    // Outrolistan: sorterad, egen rad markerad
+    await page.locator("#act-outro").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(1500);
+    const rows = await page.$$eval(".hiscore .hs-row", (li) =>
+      li.map((l) => [l.querySelector(".hs-rank")!.textContent, l.querySelector(".hs-name")!.textContent, l.querySelector(".hs-score")!.textContent, l.classList.contains("hs-me")])
+    );
+    expect(rows).toEqual([
+      ["1", "Anna", "5000", false],
+      ["2", "Vilgot", String(score), true],
+      ["3", "Bo", "3", false],
+    ]);
+    await page.screenshot({ path: path.join(QA_DIR, "screenshot-board-outro.png") });
+  });
+
+  test("'Posta alltid' is saved per guest and then skips the question", async ({ page }) => {
+    await fakeBoard(page, {});
+    const score = await playToGameOver(page, "/?g=Vilgot");
+    await page.locator("#post-always").check();
+    await page.locator("#btn-post-yes").tap();
+    await expect.poll(() => writes(page)).toEqual([{ key: "vilgot", name: "Vilgot", score }]);
+    expect(await page.evaluate(() => localStorage.getItem("vilgots-kalas-autopost:vilgot"))).toBe("1");
+
+    // Ny sida med en lägre poäng på listan: ingen fråga, postas direkt
+    await page.evaluate(() => localStorage.setItem("vilgots-kalas-best", "0"));
+    const page2 = await page.context().newPage();
+    await fakeBoard(page2, { vilgot: { name: "Vilgot", score: 1, updatedAt: 1 } });
+    const score2 = await playToGameOver(page2, "/?g=Vilgot");
+    await expect.poll(() => writes(page2)).toEqual([{ key: "vilgot", name: "Vilgot", score: score2 }]);
+    await expect(panel(page2)).toBeHidden();
+  });
+
+  test("without ?g, or with a name outside the guest list: never written, own-link hint shown", async ({ page }) => {
+    for (const url of ["/", "/?g=Emma"]) {
+      await fakeBoard(page, {});
+      await page.addInitScript(() => localStorage.setItem("vilgots-kalas-autopost:emma", "1"));
+      await playToGameOver(page, url);
+      await expect(panel(page), url).toBeHidden();
+      await expect(page.locator("#board-status"), url).toContainText("Öppna din egen länk");
+      await page.waitForTimeout(500);
+      expect(await writes(page), url).toEqual([]);
+    }
+  });
+
+  test("top 10 with own row beyond 10, and a new #1 gives fanfare + NEW HIGH SCORE!", async ({ page }) => {
+    const initial: S = {};
+    for (let i = 0; i < 11; i++) initial[`g${i}`] = { name: `Gäst ${i}`, score: 1000 - i * 10, updatedAt: 1 };
+    initial.vilgot = { name: "Vilgot", score: 5, updatedAt: 1 };
+    await fakeBoard(page, initial);
+    await page.goto("/?g=Vilgot");
+    await page.waitForLoadState("networkidle");
+    await page.locator("#act-outro").scrollIntoViewIfNeeded();
+    await expect(page.locator(".hiscore")).toHaveAttribute("data-board", "ok");
+    const names = await page.$$eval(".hiscore .hs-row .hs-name", (n) => n.map((x) => x.textContent));
+    expect(names.slice(0, 10)).toEqual(Array.from({ length: 10 }, (_, i) => `Gäst ${i}`));
+    expect(names.slice(10)).toEqual(["…", "Vilgot"]);
+    await expect(page.locator(".hiscore .hs-me .hs-rank")).toHaveText("12");
+
+    // Någon annan tar förstaplatsen
+    await page.evaluate(() => {
+      const w = window as any;
+      w.__pushScores({ ...w.__scores, g5: { name: "Gäst 5", score: 4000, updatedAt: 3 } });
+    });
+    await expect(page.locator(".levelup")).toHaveText("NEW HIGH SCORE!");
+    expect(await page.evaluate(() => (window as any).__sfx)).toContain("chest");
+    await expect(page.locator(".hiscore .hs-row").first().locator(".hs-name")).toHaveText("Gäst 5");
+    // Ingen fanfar när någon längre ner förbättrar sig
+    await page.waitForTimeout(2500);
+    await page.evaluate(() => {
+      const w = window as any;
+      w.__sfx.length = 0;
+      w.__pushScores({ ...w.__scores, g9: { name: "Gäst 9", score: 950, updatedAt: 4 } });
+    });
+    await page.waitForTimeout(500);
+    expect(await page.evaluate(() => (window as any).__sfx)).toEqual([]);
+  });
+
+  test("Firebase errors: read denied or write denied → local record shown, no crash", async ({ page }) => {
+    const errors = trackErrors(page);
+    await fakeBoard(page, {}, "listen");
+    await playToGameOver(page, "/?g=Vilgot");
+    await expect(page.locator("#board-status")).toContainText("Topplistan svarar inte");
+    await expect(page.locator("#board-status")).toContainText("Ditt rekord:");
+    await expect(panel(page)).toBeHidden(); // ingen fråga när listan inte går att nå
+    await expect(page.locator(".hiscore")).toHaveAttribute("data-board", "fail");
+    await expect(page.locator("#hs-record-row")).toBeVisible(); // lokalt rekord i outron
+
+    const page2 = await page.context().newPage();
+    const errors2 = trackErrors(page2);
+    await fakeBoard(page2, {}, "post");
+    await page2.evaluate(() => localStorage.setItem("vilgots-kalas-best", "0")).catch(() => {});
+    await playToGameOver(page2, "/?g=Vilgot");
+    await page2.locator("#btn-post-yes").tap();
+    await expect(page2.locator("#board-status")).toContainText("Kunde inte posta");
+    await expect(page2.locator("#board-status")).toContainText("Ditt rekord:");
+    // Spelet går att starta igen
+    await page2.waitForTimeout(800);
+    await page2.locator("#game").tap();
+    expect(await page2.getAttribute("#game", "data-state")).toBe("run");
+    expect(errors).toEqual([]);
+    expect(errors2).toEqual([]);
+  });
+
+  test("real Firebase SDK with the network blocked: times out to local record, no crash", async ({ page }) => {
+    const pageErrors: string[] = [];
+    page.on("pageerror", (e) => pageErrors.push(e.message));
+    await playToGameOver(page, "/?g=Vilgot");
+    await expect(page.locator(".hiscore")).toHaveAttribute("data-board", "fail", { timeout: 8000 });
+    await expect(page.locator("#board-status")).toContainText("Topplistan svarar inte");
+    await expect(panel(page)).toBeHidden();
+    expect(pageErrors).toEqual([]);
+    expect(firebaseCalls, "SDK:n försökte nå Firebase men stoppades").toBeGreaterThan(0);
   });
 });

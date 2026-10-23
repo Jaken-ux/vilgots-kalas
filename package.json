@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "rules": "node scripts/gen-rules.mjs",
+    "rules:check": "node scripts/check-rules.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",
@@ -16,6 +18,7 @@
   },
   "dependencies": {
     "canvas-confetti": "^1.9.0",
+    "firebase": "^13.1.0",
     "gsap": "^3.12.0"
   }
 }

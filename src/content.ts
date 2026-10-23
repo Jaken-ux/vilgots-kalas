@@ -1,5 +1,8 @@
 export const content = {
   child: { name: "Vilgot", age: 10 },
+  // Gäster som kan hamna på minispelets topplista (via sin ?g-länk). Ändras
+  // listan: kör `npm run rules` och klistra in nya regler i Firebase (README).
+  guests: ["Vilgot"],
   party: {
     kind: "Gamingkalas",
     dateISO: "2026-11-20",

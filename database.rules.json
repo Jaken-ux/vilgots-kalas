@@ -1,0 +1,25 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "scores": {
+      ".read": true,
+      "$name": {
+        ".write": "($name === 'vilgot') && newData.exists()",
+        ".validate": "newData.hasChildren(['name', 'score', 'updatedAt']) && newData.child('updatedAt').val() === now",
+        "name": {
+          ".validate": "newData.isString() && newData.val().toLowerCase() === $name"
+        },
+        "score": {
+          ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 99999 && (!data.exists() || newData.val() > data.val())"
+        },
+        "updatedAt": {
+          ".validate": "newData.val() === now"
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    }
+  }
+}

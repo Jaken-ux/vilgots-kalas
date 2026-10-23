@@ -2,6 +2,35 @@
 
 Nyast överst. Projektet är en kopia av Livias kalas. Posterna före 2026-10-23 kommer därifrån och gäller den ärvda koden.
 
+## 2026-10-24 — Delad topplista i Firebase, opt-in
+Topplistan för minispelet ligger i Realtime Database under `/scores/<gäst i gemener>`, och identiteten är `?g`-namnet om det finns i `content.guests`. Inget postas utan "Ja!" eller "Posta alltid" (sparas per gäst).
+
+**Laddning:** Firebase laddas med `import()` vid första spelstart *eller* när high score-delen syns. Jacob valde det senare tillägget så att även den som inte spelar ser listan. Förkastat: bara vid spelstart.
+- Huvudbundlen +5,58 kB (155,49 → 161,07 kB), med Firebase i en egen chunk på 223,5 kB (49,5 kB gzip).
+- Lighthouse mobil 3 körningar: 93, 98, 98, med 0 Firebase-anrop vid sidladdning.
+
+**Gränssnitt:** topplistan har ett eget gränssnitt (`Backend`: `listen` och `post`), så att testerna kan byta Firebase mot en låtsasdatabas. All Firebase-trafik stoppas i testerna. Förkastat: att mocka Firebases websocket-protokoll, som är skört.
+
+**När frågan visas:** frågan "Nytt rekord!" visas när poängen slår gästens plats *på listan* och är högst i sessionen, inte när den slår webbläsarens lokala rekord. Annars kunde en gäst med högt lokalt rekord från tiden före topplistan aldrig komma in.
+
+**Panelen:** frågepanelen är ett syskon till `#game`, inte ett barn. Spelytan har `role="button"`, och knappar inuti den vore nästlade kontroller. Tryck på panelen ska inte heller nå spelet.
+
+**Regler:** se `scripts/gen-rules.mjs`.
+- Radering förbjuds i `.write`, eftersom `.validate` inte körs vid radering.
+- Heltal kontrolleras med `% 1 === 0`. Det är overifierat mot den riktiga databasen. Ingen Java finns, så emulatorn går inte att köra, och Jacob valde att verifiera med `npm run rules:check` efter Publish.
+- Skriptet är testat mot en lokal låtsasserver: rätta regler 15/15, befintlig poäng ger avbrott utan skrivning, för generösa regler ger larm.
+- Motsägelse i beställningen: skriptet skulle ta bort testposten, men reglerna förbjuder radering. Löst med `FIREBASE_DB_SECRET`, annars manuell instruktion, och anonym radering kontrolleras som nekad.
+
+**Risk (accepterad av Jacob):** det finns ingen inloggning. Den som känner ett gästnamn kan posta upp till 99999 i det namnet. Reglerna stoppar andra namn, sänkningar och ogiltiga värden, och fusk rensas i konsolen. Förkastat för nu: hemlig kod per gäst i länken.
+
+**Visning:**
+- Den statiska raden "Vilgot – 10 år" ersätts av listan så snart det finns poster.
+- Namn med versalt Å/Ä/Ö skrivs med gemener i pixelfonten (`pixelSafe`).
+
+**Fel jag själv införde och rättade:** spelet mätte `.game-wrap` i stället för sektionen och krympte till 192 px. Storlekstestet kontrollerar nu storleken, och den negativa kontrollen föll som den skulle.
+
+**Storlek:** `game.ts` är 6 473 B, gränsen 6,5 kB. Commit: "Add opt-in shared leaderboard".
+
 ## 2026-10-23 — Minispelet svårare: tre höjder, par, dykfågel; storleksgränsen höjd till 6,5 kB
 **Fart:** acceleration 2 → 4 px/s², taket 170 → 212 px/s (+25 %). 170 nås efter ~25 s i stället för 50.
 
