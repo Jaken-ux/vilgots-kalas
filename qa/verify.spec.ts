@@ -75,7 +75,8 @@ test.describe("Definition of Done", () => {
     }
     const checks = [
       ".title", ".hud", ".press-start", "#when-box", "#countdown", "#where-scene",
-      "#beat-gaming", "#beat-snacks", "#beat-bring", "#rsvp-form", ".hiscore", ".outro-controls",
+      "#beat-gaming", "#beat-snacks", "#beat-bring", "#act-bonus .act-title", "#game",
+      "#rsvp-form", ".hiscore", ".outro-controls",
     ];
     for (const sel of checks) {
       const opacity = await page.locator(sel).evaluate((el) => parseFloat(getComputedStyle(el).opacity));
@@ -819,5 +820,227 @@ test.describe("RSVP guest field", () => {
     const f = await submit(page, "/", "Kim");
     expect(f.name).toBe("Kim");
     expect(f.guest).toBe("okänd");
+  });
+});
+
+test.describe("Bonus level (minispel)", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  const state = (page: Page) => page.getAttribute("#game", "data-state");
+  const data = (page: Page, key: string) => page.$eval("#game", (e, k) => Number((e as HTMLElement).dataset[k]), key);
+  const scrollY = (page: Page) => page.evaluate(() => Math.round(window.scrollY));
+
+  // Riktig touchgest via CDP (start, flera move, end), så att webbläsarens egen
+  // scrollning och touch-action testas – inte bara sidans händelselyssnare
+  const swipe = async (page: Page, x: number, y: number, dy: number) => {
+    const cdp = await page.context().newCDPSession(page);
+    const pt = (yy: number) => [{ x, y: yy }];
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: pt(y) });
+    for (let i = 1; i <= 8; i++) {
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: pt(y + (dy * i) / 8) });
+    }
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await page.waitForTimeout(600); // låt ev. scroll/fling landa
+  };
+
+  const center = async (page: Page, sel: string) => {
+    const b = (await page.locator(sel).boundingBox())!;
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  };
+
+  // html har scroll-behavior: smooth – ett tryck medan sidan fortfarande scrollar
+  // stoppar bara scrollen (som på en riktig telefon) och startar inte spelet.
+  // Vänta därför tills scrollpositionen stått still.
+  const settle = async (page: Page) => {
+    let prev = -1;
+    await expect
+      .poll(async () => {
+        const y = await scrollY(page);
+        const still = y === prev;
+        prev = y;
+        return still;
+      }, { intervals: [150] })
+      .toBe(true);
+  };
+
+  const openGame = async (page: Page) => {
+    await page.goto("/");
+    await page.waitForLoadState("networkidle");
+    await page.locator("#game").scrollIntoViewIfNeeded();
+    await settle(page);
+  };
+
+  test("never starts by itself on scroll; a swipe over the idle game scrolls the page", async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto("/");
+    await page.waitForLoadState("networkidle");
+    // Scrolla genom hela sidan, förbi och tillbaka till spelet
+    await page.evaluate(async () => {
+      const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+      for (let y = 0; y < document.documentElement.scrollHeight; y += 300) {
+        window.scrollTo(0, y);
+        await delay(60);
+      }
+    });
+    await page.locator("#game").scrollIntoViewIfNeeded();
+    await settle(page);
+    expect(await state(page)).toBe("idle");
+
+    // Svep uppåt som börjar på spelytan: sidan ska scrolla och spelet inte starta
+    const c = await center(page, "#game");
+    const y0 = await scrollY(page);
+    await swipe(page, c.x, c.y, -200);
+    expect(await scrollY(page)).toBeGreaterThan(y0 + 50);
+    expect(await state(page)).toBe("idle");
+    expect(errors).toEqual([]);
+  });
+
+  test("tap starts, taps jump, the page does not scroll while playing – but scrolls outside the game", async ({ page }) => {
+    const errors = trackErrors(page);
+    await openGame(page);
+    const game = page.locator("#game");
+    await game.tap();
+    expect(await state(page)).toBe("run");
+    await expect(game).toHaveCSS("touch-action", "none");
+    const y0 = await scrollY(page);
+
+    for (let i = 0; i < 3; i++) {
+      await game.tap();
+      await page.waitForTimeout(700); // landa innan nästa hopp
+    }
+    expect(await data(page, "jumps")).toBe(3);
+
+    // Svep på spelytan under spel: ett hopp, ingen scroll
+    const c = await center(page, "#game");
+    await swipe(page, c.x, c.y, -250);
+    expect(await data(page, "jumps")).toBe(4);
+    expect(await scrollY(page)).toBe(y0);
+
+    // Samma svep på texten ovanför spelet scrollar sidan som vanligt
+    const h = await center(page, "#act-bonus .bonus-hint");
+    await swipe(page, h.x, h.y, -250);
+    expect(await scrollY(page)).toBeGreaterThan(y0 + 50);
+    expect(errors).toEqual([]);
+  });
+
+  test("game over after three crashes, best score saved per browser and shown in high score", async ({ page }) => {
+    await page.addInitScript(() => ((window as any).__sfx = []));
+    const errors = trackErrors(page);
+    await openGame(page);
+    await expect(page.locator("#hs-record-row")).toBeHidden(); // inget rekord än
+
+    const game = page.locator("#game");
+    await game.tap();
+    // Ingen hoppar: tre krockar. I samma ögonblick som game over inträffar trycks
+    // Enter inne i sidan – spärren ska hindra en omstart (ett hopptryck för mycket)
+    const afterInstantPress = await page.evaluate(
+      () =>
+        new Promise<string>((resolve) => {
+          const el = document.getElementById("game")!;
+          new MutationObserver(() => {
+            if (el.dataset.state !== "over") return;
+            el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+            resolve(el.dataset.state!);
+          }).observe(el, { attributes: true, attributeFilter: ["data-state"] });
+        })
+    );
+    expect(afterInstantPress).toBe("over");
+    expect(await state(page)).toBe("over");
+    expect(await data(page, "lives")).toBe(0);
+    const score = await data(page, "score");
+    expect(score).toBeGreaterThan(0);
+    const sfx: string[] = await page.evaluate(() => (window as any).__sfx);
+    expect(sfx.filter((s) => s === "ouch")).toHaveLength(2);
+    expect(sfx).toContain("gameover");
+    await expect(page.locator("#game-status")).toContainText(`Game over. Poäng ${score}`);
+    await page.waitForTimeout(300);
+    await game.screenshot({ path: path.join(QA_DIR, "screenshot-game-over.png") });
+
+    expect(await page.evaluate(() => localStorage.getItem("vilgots-kalas-best"))).toBe(String(score));
+    await expect(page.locator("#hs-record-row")).toBeVisible();
+    await expect(page.locator("#hs-record-row")).toHaveText(`Ditt rekord: ${score}`);
+
+    // Efter spärren startar ett tryck om spelet
+    await page.waitForTimeout(800);
+    await game.tap();
+    expect(await state(page)).toBe("run");
+
+    // Rekordet gäller webbläsaren, inte gästen, och rensas inte av ?reset=1
+    for (const url of ["/?g=Emma", "/?reset=1"]) {
+      await page.goto(url);
+      await page.waitForLoadState("networkidle");
+      await expect(page.locator("#hs-record-row"), url).toHaveText(`Ditt rekord: ${score}`);
+    }
+    await page.locator("#act-outro").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(1200);
+    await page.screenshot({ path: path.join(QA_DIR, "screenshot-outro-record.png") });
+    expect(errors).toEqual([]);
+  });
+
+  test("runs on requestAnimationFrame only while playing; pauses when hidden or scrolled away", async ({ page }) => {
+    // Räkna helbildsritningar (himlen fylls en gång per bildruta, 192×96 spelpixlar)
+    await page.addInitScript(() => {
+      const w = window as any;
+      w.__frames = 0;
+      const orig = CanvasRenderingContext2D.prototype.fillRect;
+      CanvasRenderingContext2D.prototype.fillRect = function (x: number, y: number, ww: number, hh: number) {
+        if (ww === 192 && hh === 96) w.__frames++;
+        return orig.call(this, x, y, ww, hh);
+      };
+    });
+    const framesIn = async (ms: number) => {
+      const a = await page.evaluate(() => (window as any).__frames);
+      await page.waitForTimeout(ms);
+      return (await page.evaluate(() => (window as any).__frames)) - a;
+    };
+    await openGame(page);
+    expect(await framesIn(1000)).toBe(0); // ingen loop i viloläge
+
+    await page.locator("#game").tap();
+    expect(await framesIn(1000)).toBeGreaterThanOrEqual(50); // ~60 fps
+
+    // Utom synhåll: paus, ingen loop, och ingen automatisk fortsättning
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await expect.poll(() => state(page)).toBe("pause");
+    expect(await framesIn(800)).toBe(0);
+    await page.locator("#game").scrollIntoViewIfNeeded();
+    await settle(page);
+    expect(await state(page)).toBe("pause");
+    await page.locator("#game").tap();
+    expect(await state(page)).toBe("run");
+
+    // Dold flik: paus
+    await page.evaluate(() => {
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(await state(page)).toBe("pause");
+    expect(await framesIn(500)).toBe(0);
+  });
+
+  test("canvas is pixel-perfect: integer scale in device pixels, pixelated", async ({ page }) => {
+    await openGame(page);
+    const m = await page.$eval("#game-canvas", (c) => ({
+      w: (c as HTMLCanvasElement).width,
+      h: (c as HTMLCanvasElement).height,
+      css: c.getBoundingClientRect().width,
+      dpr: window.devicePixelRatio,
+      rendering: getComputedStyle(c).imageRendering,
+    }));
+    expect(m.w % 192).toBe(0);
+    expect(m.h).toBe(m.w / 2);
+    expect(Math.round(m.css * m.dpr)).toBe(m.w); // 1 canvaspixel = 1 enhetspixel
+    expect(m.rendering).toBe("pixelated");
+  });
+
+  test("keyboard: Space starts and jumps without scrolling the page", async ({ page }) => {
+    await openGame(page);
+    await page.locator("#game").focus();
+    const y0 = await scrollY(page);
+    await page.keyboard.press("Space");
+    expect(await state(page)).toBe("run");
+    await page.keyboard.press("Space");
+    expect(await data(page, "jumps")).toBe(1);
+    expect(await scrollY(page)).toBe(y0);
   });
 });

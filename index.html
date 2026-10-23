@@ -220,6 +220,19 @@
       </div>
     </section>
 
+    <!-- BONUS LEVEL: minispel (src/game.ts). Startar bara på tryck. -->
+    <section class="act act-bonus" id="act-bonus">
+      <div class="act-inner">
+        <h2 class="act-title reveal">Bonus level</h2>
+        <p class="bonus-hint reveal">Tryck på spelet för att starta. Tryck igen för att hoppa över buskar, block och fåglar. Tre krockar så är det game over.</p>
+        <div class="game px" id="game" tabindex="0" role="button" aria-label="Minispel: tryck för att starta, tryck igen för att hoppa" aria-describedby="game-status" data-state="idle">
+          <canvas id="game-canvas" width="192" height="96"></canvas>
+        </div>
+        <p class="sr-only" id="game-status" aria-live="polite"></p>
+        <noscript><p class="bonus-hint">Spelet behöver JavaScript.</p></noscript>
+      </div>
+    </section>
+
     <!-- OSA -->
     <section class="act act-rsvp" id="act-rsvp">
       <div class="act-inner">
@@ -288,6 +301,7 @@
         <h2 class="hs-title credits-line">High score</h2>
         <ol class="hiscore credits-line">
           <li class="hs-row hs-top"><span class="hs-rank">1</span><span class="hs-name" id="hs-name"></span><span class="hs-dots" aria-hidden="true"></span><span class="hs-score" id="hs-score"></span></li>
+          <li class="hs-record" id="hs-record-row" hidden>Ditt rekord: <span id="hs-record"></span></li>
           <li class="hs-row hs-you"><span class="hs-rank">2</span><span class="hs-name">Du?<span class="hs-cursor" aria-hidden="true">_</span></span><span class="hs-dots" aria-hidden="true"></span><span class="hs-score">???</span></li>
         </ol>
         <p class="credits-line credits-big" id="outro-see-you"></p>

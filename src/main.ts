@@ -1,5 +1,6 @@
 import { content, staticText, staticHref, seeYouText } from "./content";
 import { spriteSvg } from "./sprites";
+import { initGame, bestScore } from "./game";
 import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import confetti from "canvas-confetti";
@@ -307,7 +308,7 @@ function initAudioUnlock() {
 
 // 8-bitarsljud syntetiseras direkt med Web Audio (fyrkant- och triangelvågor
 // med korta envelopes) – inga ljudfiler att ladda.
-type SoundName = "blip" | "coin" | "dig" | "chest" | "ouch" | "gameover" | "levelup" | "equip";
+type SoundName = "blip" | "coin" | "dig" | "chest" | "ouch" | "gameover" | "levelup" | "equip" | "jump";
 const MASTER_VOLUME = 0.22;
 
 interface Note {
@@ -410,6 +411,8 @@ const SYNTHS: Record<SoundName, (ctx: AudioContext, out: AudioNode, t0: number, 
     note(c, o, t, r, { f: 330, to: 990, at: 0, dur: 0.14, vol: 0.35 });
     note(c, o, t, r, { f: 1319, at: 0.15, dur: 0.08, vol: 0.3 });
   },
+  // Hopp i minispelet: kort glid uppåt
+  jump: (c, o, t, r) => note(c, o, t, r, { f: 300, to: 700, at: 0, dur: 0.12, vol: 0.3 }),
 };
 
 function playSound(name: SoundName, { rate = 1, volume = 1 } = {}) {
@@ -976,6 +979,18 @@ function handleReset(): boolean {
   return true;
 }
 
+// ===== BONUS LEVEL (minispelet i src/game.ts) =====
+// Bästa poängen visas under Vilgot i high score-listan när det finns en
+function showRecord(n: number) {
+  $("#hs-record").textContent = String(n);
+  $("#hs-record-row").hidden = false;
+}
+
+function initBonus() {
+  if (bestScore() > 0) showRecord(bestScore());
+  initGame($("#game"), (s) => playSound(s), showRecord);
+}
+
 // Varje steg körs för sig: ett fel i t.ex. ljud eller konfetti ska inte stoppa
 // resten. Fel loggas till window.__errors (visas med ?debug=1, se <head>).
 function init() {
@@ -992,6 +1007,7 @@ function init() {
     ["dig", initDig],
     ["chest", initChest],
     ["hearts", initHearts],
+    ["bonus", initBonus],
     ["mute", initMuteToggle],
     ["audio", initAudioUnlock],
     ["rsvp", initRSVP],

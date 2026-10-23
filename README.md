@@ -10,8 +10,9 @@ Mobilanpassad, ensidig inbjudningssida till Vilgots 10-årskalas (gamingkalas). 
 | När (`#act-when`) | Datum, tid, nedräkning som mynträkneverk | – |
 | Var (`#act-where`) | Skylt och skattkista | Skylten vecklar ut en skattkarta med adress och kartlänkar. Kistan öppnas med ett regn av pixelmynt |
 | Vad händer (`#act-program`) | Gaming, snacks, ta med (egen ruta) | – |
+| Bonus level (`#act-bonus`) | Minispel i `<canvas>` (src/game.ts) | Tryck startar, tryck = hopp över buskar, block och fåglar. Tre liv. Bästa poäng visas i high score |
 | OSA (`#act-rsvp`) | Formuläret | Ja ger pixelkonfetti och "LEVEL UP!" |
-| High score (`#act-outro`) | "Vilgot – 10 år" och "Du?" | Ljud av/på |
+| High score (`#act-outro`) | "Vilgot – 10 år", "Ditt rekord: N" (när minispelet spelats) och "Du?" | Ljud av/på |
 
 ## Köra lokalt
 
@@ -47,9 +48,19 @@ node scripts/convert-images.mjs
 
 Beskärningen står i skriptet. Ändras porträttets beskärning måste solglasögonens och kronans placering (`.shades`, `.crown` i `src/style.css`) kalibreras om.
 
+## Minispelet (Bonus level)
+
+`src/game.ts`, utan bibliotek, under 6 kB (4,9 kB minifierat, 2,5 kB gzip). Spelet räknar i spelpixlar (192×96). Canvasen får bredden 192·k *enhetspixlar*, med k som heltal, och ritar med `ctx.scale(k)`, så varje spelpixel blir exakt k×k skärmpixlar.
+
+- **Start:** spelet startar bara på ett riktigt tryck (eller Mellanslag/Enter), aldrig av scroll. I viloläge släpps scrollgester igenom (`touch-action: pan-y`). Under spel äts all touch (`.playing` → `touch-action: none` + `preventDefault`), så ett hopp aldrig scrollar sidan.
+- **Loop:** körs med `requestAnimationFrame` bara under spel. Spelet pausas när det är mindre än 30 % synligt eller fliken döljs, och fortsätter bara på tryck.
+- **Poäng och liv:** poängen är sprungen sträcka. Tre krockar ger game over, med en kort skyddstid efter varje krock.
+- **Rekord:** bästa poäng sparas per webbläsare (inte per gäst) i `localStorage` under `vilgots-kalas-best`, och rensas inte av `?reset=1`.
+- **Testkrokar:** `#game` har `data-state` (idle/run/pause/over), `data-lives`, `data-score` och `data-jumps`.
+
 ## Ljud
 
-Alla ljud är syntetiserade 8-bitarsljud (fyrkant- och triangelvågor, brus för grävljudet) i `SYNTHS` i `src/main.ts`. Det finns inga ljudfiler. Ljudet startar först vid ett tryck (krav i iOS), ljudknappen i high score-delen stänger av allt, och valet sparas i `localStorage` (`vilgots-kalas-mute`).
+Alla ljud (även minispelets hopp och dödsljud) är syntetiserade 8-bitarsljud (fyrkant- och triangelvågor, brus för grävljudet) i `SYNTHS` i `src/main.ts`. Det finns inga ljudfiler. Ljudet startar först vid ett tryck (krav i iOS), ljudknappen i high score-delen stänger av allt, och valet sparas i `localStorage` (`vilgots-kalas-mute`).
 
 ## Utan JavaScript och felsökning
 

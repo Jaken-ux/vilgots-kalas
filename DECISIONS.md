@@ -2,6 +2,21 @@
 
 Nyast överst. Projektet är en kopia av Livias kalas. Posterna före 2026-10-23 kommer därifrån och gäller den ärvda koden.
 
+## 2026-10-23 — Minispel "Bonus level": tre liv i spelet, inte kopplat till HUD-hjärtana
+Spelet har tre egna liv, ritade som hjärtan i canvasen: tre krockar innan game over, med 1,2 s skyddstid (gubben blinkar) efter varje krock. Det är inte kopplat till HUD-hjärtana i titelskärmen. Skäl:
+1. Målgruppen är 8–10 år, och game over vid första krocken känns hårt.
+2. HUD:en ligger ~3 500 px ovanför spelet och syns inte medan man spelar.
+3. HUD-hjärtana är en leksak som kan stå på "GAME OVER?" (0 liv), och det tillståndet skulle då läcka in i spelet.
+
+Förkastat: en krock = game over. Förkastat: att dela livräkning med HUD:en.
+
+Övriga val:
+- **Start:** bara på ett riktigt tryck (pointerup inom 10 px och 600 ms, ingen pointercancel), och `touch-action` växlar från `pan-y` (viloläge) till `none` (under spel). Förkastat: `touch-action: none` hela tiden, eftersom ett svep över spelet då inte kan scrolla sidan och dessutom skulle starta spelet.
+- **Skärpa:** canvasens upplösning är 192·k enhetspixlar med heltal k, och allt ritas med `ctx.scale(k)`. Förkastat: att rita 192×96 och skala upp med CSS (pixelated), eftersom texten då blir suddig. Känd följd: vid dpr 1 och smal skärm blir spelet bara 192 px brett.
+- **Rekord:** sparas per webbläsare i `vilgots-kalas-best` och rensas inte av `?reset=1`, som bara gäller OSA-svar.
+- **Paus:** spelet pausas under 30 % synlighet och vid dold flik, och fortsätter bara på tryck. Förkastat: automatisk fortsättning, eftersom gubben då kan krocka innan man hunnit reagera.
+- **Storlek:** game.ts är 4 945 B minifierat (2 462 B gzip), och bundlen växte med 5,2 kB inklusive kopplingen i main.ts och hoppljudet. Lighthouse mobil 3 körningar: 98, 100, 98.
+
 ## 2026-10-23 — Testsviten: mätning av animerade element
 Två tester var felaktiga, inte sidan: porträttramens storlek mättes med `boundingBox()` (räknar med intro-animationens skalning, 76,8 i stället för 192 px), och spricka 2 i grävblocket (synlig ~0,1 s) missades av poll i 1 av 10 körningar. Nu mäts `offsetWidth/offsetHeight` och sprickan registreras med en MutationObserver. Förkastat: att förlänga sprickans visning för testets skull. Nödspärrstestet pollar nu synligheten, eftersom adresskortet vecklas ut med en övergång. Upprepat: dig-testet 15/15, interaktioner/ljud/OSA 5×7 gröna. Commit: "Initial Vilgots kalas".
 

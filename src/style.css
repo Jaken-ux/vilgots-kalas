@@ -926,6 +926,51 @@ h1, h2, .act-title {
   display: none;
 }
 
+/* ===== BONUS LEVEL (minispel) ===== */
+.act-bonus {
+  background: var(--dirt-deep);
+  min-height: auto;
+  padding: 5rem 1.25rem;
+}
+
+.bonus-hint {
+  font-size: 0.95rem;
+  color: var(--text-dim);
+  margin-bottom: 1.8rem;
+}
+
+/* Spelytan: bredden följer canvasen, som får en heltalsskala i JS (src/game.ts).
+   Scrollgester släpps igenom tills spelet körs; då äts all touch (.playing). */
+.game {
+  --frame: var(--grass);
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
+  background: #10162C;
+  cursor: pointer;
+  outline: none;
+  touch-action: pan-y;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.game.playing {
+  touch-action: none;
+}
+
+.game:focus-visible {
+  --frame: var(--neon);
+}
+
+.game canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+}
+
 /* ===== OSA ("bossen") ===== */
 .act-rsvp {
   background: #12091C;
@@ -1218,6 +1263,14 @@ h1, h2, .act-title {
 
 .hs-top {
   color: var(--gold);
+}
+
+/* Rekordet från minispelet, direkt under Vilgot */
+.hs-record {
+  margin: -0.4rem 0 0.4rem 2.2rem;
+  font-size: 0.6rem;
+  text-transform: none;
+  color: var(--sky);
 }
 
 /* Versalt Å saknar synlig ring i Press Start 2P – "år" ska stå i gemener */
