@@ -50,13 +50,15 @@ Beskärningen står i skriptet. Ändras porträttets beskärning måste solglas�
 
 ## Minispelet (Bonus level)
 
-`src/game.ts`, utan bibliotek, under 6 kB (4,9 kB minifierat, 2,5 kB gzip). Spelet räknar i spelpixlar (192×96). Canvasen får bredden 192·k *enhetspixlar*, med k som heltal, och ritar med `ctx.scale(k)`, så varje spelpixel blir exakt k×k skärmpixlar.
+`src/game.ts`, utan bibliotek, under 6,5 kB (6,2 kB minifierat, 3,1 kB gzip; mätt med esbuild `--charset=utf8`, som bygget levererar). Spelet räknar i spelpixlar (192×96). Canvasen får bredden 192·k *enhetspixlar*, med k som heltal, och ritar med `ctx.scale(k)`, så varje spelpixel blir exakt k×k skärmpixlar.
 
 - **Start:** spelet startar bara på ett riktigt tryck (eller Mellanslag/Enter), aldrig av scroll. I viloläge släpps scrollgester igenom (`touch-action: pan-y`). Under spel äts all touch (`.playing` → `touch-action: none` + `preventDefault`), så ett hopp aldrig scrollar sidan.
 - **Loop:** körs med `requestAnimationFrame` bara under spel. Spelet pausas när det är mindre än 30 % synligt eller fliken döljs, och fortsätter bara på tryck.
 - **Poäng och liv:** poängen är sprungen sträcka. Tre krockar ger game over, med en kort skyddstid efter varje krock.
+- **Svårighet:** farten går från 70 till 212 spelpixlar/s (170 efter ~25 s, taket efter ~35 s). Hindren (`KINDS`) kommer i tre markhöjder: låga buskar och block, mellanblock och en hög, smal pelare. Till det kommer en rak fågel i huvudhöjd och en dykfågel i två varianter. Den tidiga dykaren når huvudhöjd innan den är framme och ska hoppas över. Den sena sveper över huvudet och kräver att man står kvar. Cirka 20 % av de låga hindren kommer i par.
+- **Rättvisa:** `jumpWindow()` räknar ut inom vilket avstånd ett avstamp klarar ett hinder vid aktuell fart. `minGap()` räknar ut det kortaste avstånd mellan två hinder som går att klara, och `nextGap()` slumpar aldrig under det. Testsviten låter en bot som hoppar mitt i fönstret spela 60 s utan krock, och en bot som aldrig hoppar ska dö inom 15 s.
 - **Rekord:** bästa poäng sparas per webbläsare (inte per gäst) i `localStorage` under `vilgots-kalas-best`, och rensas inte av `?reset=1`.
-- **Testkrokar:** `#game` har `data-state` (idle/run/pause/over), `data-lives`, `data-score` och `data-jumps`.
+- **Testkrokar:** `#game` har `data-state` (idle/run/pause/over), `data-lives`, `data-score` och `data-jumps`. Finns `window.__gameHook` när spelet startar får den läsa höjd, hinder och fart (används av botarna).
 
 ## Ljud
 

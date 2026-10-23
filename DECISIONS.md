@@ -2,6 +2,24 @@
 
 Nyast överst. Projektet är en kopia av Livias kalas. Posterna före 2026-10-23 kommer därifrån och gäller den ärvda koden.
 
+## 2026-10-23 — Minispelet svårare: tre höjder, par, dykfågel; storleksgränsen höjd till 6,5 kB
+**Fart:** acceleration 2 → 4 px/s², taket 170 → 212 px/s (+25 %). 170 nås efter ~25 s i stället för 50.
+
+**Hinder:** låga (busk 10×6, block 8×8), mellan (16×16) och hög smal pelare (6×28). Därtill rak fågel i huvudhöjd och dykfågel i två varianter: tidig (måste hoppas) och sen (sveper över huvudet, stå kvar). Par: ~20 % av de låga, med avståndet satt så att andra hoppet görs direkt vid landning.
+
+**Rättvisa:** beräknad i stället för provad. `jumpWindow` (avstampsfönster ur v₀ = 260 och g = 900) och `minGap` = v·luftid − tidigaste avstamp för a + senaste för b. `nextGap` ligger alltid minst 6 px över minimum vid farten då hindret når gubben. Fönstren är 160–470 ms breda.
+- Bot "mitt i fönstret": 3 × 65 s och 62 s utan krock, med alla typer.
+- Kontrollbotar: "aldrig hopp" död efter 6 s, "hoppar i sista stund" efter 9 s, "hoppar även för sen dykare" efter 28 s.
+
+**Förkastat:**
+- En enda dykvariant som planar ut före gubben. Den gav ingen timingskillnad, eftersom ett tidigt hopp ändå klarade den.
+- Den gamla "låga" fågeln (GROUND − 13). Den träffade bara en hoppande gubbe, så den stående klarade sig alltid – ett fel i förra versionen.
+
+**Storlek:** 6 168 B minifierat (3 135 B gzip, UTF-8) mot gränsen 6 kB. Tre trimningsrundor gav −244 B. Jacob valde att höja gränsen till 6,5 kB i stället för run-length-kodade sprites (oläsliga) eller färre hinder.
+- Bortplockat för storlekens skull: rubriken "Bonus level" inne i spelytan (den står redan ovanför), dykfågelns egen klocka (vingslagen räknas nu på sträcka, 2,4× tätare än den raka fågeln) och `canvas.style.height` (CSS `height: auto` räcker).
+
+**Scroll- och touchkoden är oförändrad.** Commit: "Tune minigame difficulty".
+
 ## 2026-10-23 — Minispel "Bonus level": tre liv i spelet, inte kopplat till HUD-hjärtana
 Spelet har tre egna liv, ritade som hjärtan i canvasen: tre krockar innan game over, med 1,2 s skyddstid (gubben blinkar) efter varje krock. Det är inte kopplat till HUD-hjärtana i titelskärmen. Skäl:
 1. Målgruppen är 8–10 år, och game over vid första krocken känns hårt.

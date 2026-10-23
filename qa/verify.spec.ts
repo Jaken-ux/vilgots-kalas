@@ -2,6 +2,7 @@ import { test, expect, devices } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import { KINDS, jumpWindow, minGap, nextGap } from "../src/game";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1042,5 +1043,97 @@ test.describe("Bonus level (minispel)", () => {
     await page.keyboard.press("Space");
     expect(await data(page, "jumps")).toBe(1);
     expect(await scrollY(page)).toBe(y0);
+  });
+});
+
+test.describe("Bonus level: svårighet och rättvisa", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  // Ren fysik, ingen webbläsare: varje hinder går att klara vid alla farter, och
+  // slumpat avstånd är aldrig kortare än det fysiska minimumet
+  test("every obstacle has a jump window and every gap is clearable, 70–212 px/s", () => {
+    const kinds = Object.values(KINDS);
+    for (let v = 70; v <= 212; v += 2) {
+      for (const a of kinds) {
+        const [lo, hi] = jumpWindow(a, v);
+        if (!a.stand) expect(hi - lo, `fönster v=${v}`).toBeGreaterThan(10);
+        for (const b of kinds) {
+          for (const r of [0, 0.5, 1]) {
+            expect(nextGap(a, b, v, r, false)).toBeGreaterThanOrEqual(minGap(a, b, v) + 6);
+          }
+          // Par (två låga): andra hoppet direkt vid landning, och aldrig under minimum
+          if (a.pair && b.pair) {
+            const g = nextGap(a, b, v, 0, true);
+            expect(g).toBeGreaterThanOrEqual(minGap(a, b, v));
+            expect(g).toBeLessThan(v * 0.65 + 10); // tätt: ungefär en hopplängd
+          }
+        }
+      }
+    }
+    // Tre höjder på markhindren
+    expect([KINDS.bush.h, KINDS.big.h, KINDS.pillar.h]).toEqual([6, 16, 28]);
+    expect(KINDS.pillar.w).toBeLessThan(KINDS.bush.w);
+  });
+
+  // Boten körs inne i sidan och trycker via riktiga pointerdown på spelytan.
+  // "Hoppa när hindret är X px bort", X = mitt i hoppfönstret vid aktuell fart.
+  const startBot = async (page: Page, jumpAtAll: boolean) => {
+    await page.addInitScript((jumpAtAll) => {
+      const w = window as any;
+      w.__kinds = [];
+      w.__gameHook = (api: any) => {
+        let prev: unknown = null;
+        const tick = () => {
+          const el = document.getElementById("game")!;
+          const o = api.obs().find((o: any) => o.x + o.k.w > 26);
+          if (o && o !== prev) w.__kinds.push(o.k);
+          prev = o;
+          if (jumpAtAll && el.dataset.state === "run" && api.y() === 0 && o && !o.k.stand) {
+            const [lo, hi] = api.win(o.k, api.v());
+            const d = o.x - 30;
+            if (d <= (lo + hi) / 2 && d >= lo) {
+              el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
+            }
+          }
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      };
+    }, jumpAtAll);
+    await page.goto("/");
+    await page.waitForLoadState("networkidle");
+    await page.locator("#game").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(1500); // scrollen har stannat (smooth)
+    await page.locator("#game").tap();
+    expect(await page.getAttribute("#game", "data-state")).toBe("run");
+  };
+
+  test("a bot that jumps at the right moment survives 60 s without a single crash", async ({ page }) => {
+    test.setTimeout(120000);
+    const errors = trackErrors(page);
+    await startBot(page, true);
+    const t0 = Date.now();
+    while (Date.now() - t0 < 60000) {
+      expect(await page.getAttribute("#game", "data-state")).toBe("run");
+      expect(await page.getAttribute("#game", "data-lives"), `krock efter ${(Date.now() - t0) / 1000} s`).toBe("3");
+      await page.waitForTimeout(1000);
+    }
+    // Svårigheten var faktiskt med: alla markhöjder och minst en dykfågel. (En
+    // viss dykvariant uteblir i ~2 % av körningarna av ren slump; båda täcks
+    // deterministiskt av fysiktestet ovan.)
+    const seen: { h: number; dive?: number }[] = await page.evaluate(() => (window as any).__kinds);
+    const heights = new Set(seen.filter((k) => k.dive === undefined).map((k) => k.h));
+    expect([...heights].sort((a, b) => a - b)).toEqual(expect.arrayContaining([6, 8, 16, 28]));
+    expect(seen.some((k) => k.dive !== undefined), "dykfågel").toBe(true);
+    expect(Number(await page.getAttribute("#game", "data-score"))).toBeGreaterThan(900);
+    expect(errors).toEqual([]);
+  });
+
+  test("a bot that never jumps is game over within 15 s", async ({ page }) => {
+    await startBot(page, false);
+    const t0 = Date.now();
+    await expect.poll(() => page.getAttribute("#game", "data-state"), { timeout: 15000, intervals: [250] }).toBe("over");
+    expect(Date.now() - t0).toBeLessThan(15000);
+    expect(await page.getAttribute("#game", "data-jumps")).toBe("0");
   });
 });

@@ -14,6 +14,18 @@ const RX = 24; // gubbens x
 const LIVES = 3;
 const BEST_KEY = "vilgots-kalas-best"; // per webbläsare, inte per gäst
 
+// Fart (spelpixlar/s): når 170 efter ~25 s och taket 212 efter ~35 s
+const V_START = 70;
+const V_MAX = 212;
+const ACC = 4;
+// Hopp: utgångsfart och gravitation ger 0,58 s i luften och 37 px topphöjd
+const V0 = 260;
+const GRAV = 900;
+const AIR = (2 * V0) / GRAV;
+// Dykfågeln: från HIGH ner till huvudhöjd LOW under 60 px
+const HIGH = 30;
+const LOW = 69;
+
 // Gubben (8×10): två springsteg och ett hopp. Samma tecken som i sprites.ts.
 const HEAD = ["..DDDD..", ".DDDDDD.", ".ppppkp.", ".pppppp.", "..pppp..", ".gggggg.", "pggggggp", ".GGGGGG."];
 const RUN_A = [...HEAD, ".BB..BB.", "kk....kk"];
@@ -21,8 +33,78 @@ const RUN_B = [...HEAD, "..BBBB..", "..kkkk.."];
 const JUMP = [...HEAD, ".BBBBBB.", ".k....k."];
 const BUSH = ["...GGG....", ".GGgggGG..", "GgglggggG.", "GgggggglgG", "GggggggggG", "GGGGGGGGGG"];
 const BLOCK = ["kkkkkkkk", "kwssssSk", "kssssssk", "kssSsssk", "ksssssSk", "kSssssSk", "kSSSSSSk", "kkkkkkkk"];
-const BIRD_A = ["bb....bb", ".bbkbbb.", "..bbbbyy", "........"];
-const BIRD_B = ["........", "..bkbbb.", ".bbbbbyy", "bb....bb"];
+const BIG = [...BLOCK, ...BLOCK].map((r) => r + r); // 16×16
+const PILLAR = ["kkkkkk", ...Array.from({ length: 26 }, (_, i) => (i % 7 === 6 ? "kSSSSk" : "kwsssk")), "kkkkkk"];
+const BIRD = [
+  ["bb....bb", ".bbkbbb.", "..bbbbyy", "........"],
+  ["........", "..bkbbb.", ".bbbbbyy", "bb....bb"],
+];
+// Dykfågeln: neonfärgad, stora vingslag (vingarna upp, sedan ner)
+const WING = ["n........n", ".nn....nn."];
+const BODY = ["..nnknnnyy", "...nnnnn.."];
+const NONE = "..........";
+const DIVE = [
+  [...WING, ...BODY, NONE, NONE],
+  [NONE, NONE, ...BODY, ...WING.slice().reverse()],
+];
+
+// Hindertyper. f = animationsrutor (sprite-rader), w/h = storlek, y = överkant
+// (marken om inget anges), dive = avstånd där dykfågeln når huvudhöjd,
+// stand = ska INTE hoppas över, pair = kan komma två i rad.
+export interface Kind {
+  f: string[][];
+  w: number;
+  h: number;
+  y: number;
+  dive?: number;
+  stand?: boolean;
+  pair?: boolean;
+}
+const kind = (f: string[][], y?: number, o?: Partial<Kind>): Kind => {
+  const h = f[0].length;
+  return { f, w: f[0][0].length, h, y: y ?? GROUND - h, ...o };
+};
+export const KINDS = {
+  bush: kind([BUSH], undefined, { pair: true }), // låg
+  block: kind([BLOCK], undefined, { pair: true }), // låg
+  big: kind([BIG]), // mellan: kräver bra timing
+  pillar: kind([PILLAR]), // hög och smal: hoppa tidigt
+  bird: kind(BIRD, GROUND - 10), // rakt fram i huvudhöjd
+  dive: kind(DIVE, LOW, { dive: 30 }), // når huvudhöjd innan den är framme: hoppa
+  swoop: kind(DIVE, LOW, { dive: -40, stand: true }), // sveper över huvudet: stå kvar
+};
+type Name = keyof typeof KINDS;
+// Blandningen efter uppvärmningen: [typ, kumulativ sannolikhet]
+const MIX = "bush block big pillar bird dive swoop".split(" ") as Name[];
+const ODDS = [0.2, 0.35, 0.55, 0.7, 0.8, 0.9, 1];
+
+// Avstånd d = hindrets x - (RX + 6): vid d < 0 överlappar hindret gubben i sidled,
+// under w + 4 px. Krocken undviks om gubben då är minst c px upp.
+const clearance = (k: Kind) => GROUND - k.y - 1;
+
+// Hoppfönster [tidigast, senast] uttryckt som d vid avstampet, vid fart v.
+// För "stand"-hinder: gubben ska stå på marken när d = 0 och kan hoppa igen
+// först när d = -(w + 4).
+export function jumpWindow(k: Kind, v: number): [number, number] {
+  if (k.stand) return [0, -(k.w + 4)];
+  const s = Math.sqrt(V0 * V0 - 2 * GRAV * clearance(k));
+  return [(v * (V0 - s)) / GRAV, (v * (V0 + s)) / GRAV - (k.w + 4)];
+}
+
+// Minsta avstånd mellan två hinders vänsterkanter så att b alltid går att klara
+// efter a: a hoppas så tidigt som möjligt, och vid landningen får b inte ha
+// passerat sitt senaste avstamp.
+export function minGap(a: Kind, b: Kind, v: number): number {
+  return (a.stand ? 0 : v * AIR) - jumpWindow(a, v)[1] + jumpWindow(b, v)[0];
+}
+
+// Slumpat avstånd (r = 0..1) – aldrig under minGap plus marginal för reaktion.
+// Par: två låga hinder där andra hoppet görs direkt vid landning.
+export function nextGap(a: Kind, b: Kind, v: number, r: number, pair: boolean): number {
+  const min = minGap(a, b, v);
+  if (pair) return Math.max(min + 4, v * AIR + 4);
+  return Math.max(min + v * 0.3 + 6, v * (AIR + 0.15 + 0.85 * r));
+}
 
 type Img = HTMLCanvasElement;
 function sprite(rows: string[]): Img {
@@ -43,8 +125,9 @@ function sprite(rows: string[]): Img {
 interface Obstacle {
   x: number;
   y: number;
+  k: Kind;
   a: Img;
-  b?: Img; // andra animationsrutan (fågeln)
+  b?: Img; // andra animationsrutan (fåglarna)
 }
 
 export function bestScore(): number {
@@ -60,10 +143,11 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, onBest: 
   const status = document.getElementById("game-status");
   const ctx = canvas.getContext("2d")!;
   const img = {
-    runA: sprite(RUN_A), runB: sprite(RUN_B), jump: sprite(JUMP), bush: sprite(BUSH), block: sprite(BLOCK),
-    birdA: sprite(BIRD_A), birdB: sprite(BIRD_B), cloud: sprite(SPRITES.cloud),
+    runA: sprite(RUN_A), runB: sprite(RUN_B), jump: sprite(JUMP), cloud: sprite(SPRITES.cloud),
     heart: sprite(SPRITES.heart), empty: sprite(SPRITES["heart-empty"]),
   };
+
+  const look = new Map(Object.values(KINDS).map((k) => [k, k.f.map(sprite)]));
 
   let state: State = "idle";
   let k = 1;
@@ -72,6 +156,7 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, onBest: 
   let speed = 0;
   let dist = 0;
   let gap = 0; // sträcka kvar till nästa hinder
+  let next: Name = "bush"; // nästa hinder som ska komma in
   let lives = LIVES;
   let inv = 0; // skyddstid efter en krock
   let obs: Obstacle[] = [];
@@ -100,8 +185,7 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, onBest: 
     k = Math.max(1, Math.floor((room * dpr) / W));
     canvas.width = W * k;
     canvas.height = H * k;
-    canvas.style.width = `${(W * k) / dpr}px`;
-    canvas.style.height = `${(H * k) / dpr}px`;
+    canvas.style.width = `${(W * k) / dpr}px`; // höjden följer (height: auto)
     draw();
   };
 
@@ -137,8 +221,11 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, onBest: 
       ctx.fillRect(Math.round((((i * 23 - dist) % W) + W) % W), GROUND + 6 + ((i * 5) % 8), 2, 2);
     }
 
-    const flap = Math.floor(dist / 12) % 2 === 0;
-    for (const o of obs) ctx.drawImage(o.b && flap ? o.b : o.a, Math.round(o.x), o.y);
+    for (const o of obs) {
+      // Dykfågeln slår med vingarna 2,4 gånger så tätt som den vanliga fågeln
+      const flap = Math.floor(dist / (o.k.dive === undefined ? 12 : 5)) % 2;
+      ctx.drawImage(o.b && flap ? o.b : o.a, Math.round(o.x), Math.round(o.y));
+    }
 
     // Gubben blinkar under skyddstiden
     if (!(inv > 0 && Math.floor(inv * 10) % 2)) {
@@ -150,51 +237,62 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, onBest: 
     text(String(score()).padStart(5, "0"), W - 4, 5, PALETTE.y, "right");
 
     if (state === "idle") {
-      text("Bonus level", W / 2, 34, PALETTE.n);
-      text("Tryck för att spela", W / 2, 50, "#FFFFFF");
+      text("Tryck för att spela", W / 2, 42, PALETTE.w);
     } else if (state === "pause") {
       text("Paus", W / 2, 34, PALETTE.b);
-      text("Tryck = fortsätt", W / 2, 50, "#FFFFFF");
+      text("Tryck = fortsätt", W / 2, 50, PALETTE.w);
     } else if (state === "over") {
       text("GAME OVER", W / 2, 22, PALETTE.r);
       text(`Poäng: ${score()}`, W / 2, 36, PALETTE.y);
-      text("Tryck för att", W / 2, 52, "#FFFFFF");
-      text("spela igen", W / 2, 62, "#FFFFFF");
+      text("Tryck för att", W / 2, 52, PALETTE.w);
+      text("spela igen", W / 2, 62, PALETTE.w);
     }
   }
 
-  const spawn = () => {
+  // Vilket hinder som helst får komma – avståndet till nästa räknas alltid ut så
+  // att det går att klara (nextGap). Fåglar och de svåra hindren kommer efter en stund.
+  const pick = (): Name => {
     const r = Math.random();
-    if (dist > 1500 && r < 0.25) {
-      // Fågel: låg (måste hoppas över) eller hög (träffar mitt i ett hopp)
-      obs.push({ x: W, y: Math.random() < 0.5 ? GROUND - 13 : GROUND - 30, a: img.birdA, b: img.birdB });
-    } else {
-      const a = r < 0.6 ? img.bush : img.block;
-      obs.push({ x: W, y: GROUND - a.height, a });
-    }
+    if (dist < 800) return r < 0.4 ? "bush" : r < 0.7 ? "block" : "big";
+    return MIX[ODDS.findIndex((p) => r < p)];
+  };
+
+  const spawn = () => {
+    const k = KINDS[next];
+    const [a, b] = look.get(k)!;
+    obs.push({ x: W, y: k.y, k, a, b });
+    // Fart när nästa hinder når gubben (lite högre än nu) – ger aldrig för kort avstånd
+    const v = Math.min(V_MAX, speed + ACC * 3);
+    const pair = !!k.pair && Math.random() < 0.2 && !obs[obs.length - 2]?.k.pair;
+    next = pair ? (Math.random() < 0.5 ? "bush" : "block") : pick();
+    gap = nextGap(k, KINDS[next], v, Math.random(), pair);
   };
 
   const hit = (o: Obstacle) => {
     const top = GROUND - 10 - y;
-    return RX + 7 > o.x + 1 && RX + 1 < o.x + o.a.width - 1 && top + 10 > o.y + 1 && top + 1 < o.y + o.a.height - 1;
+    return RX + 7 > o.x + 1 && RX + 1 < o.x + o.k.w - 1 && top + 10 > o.y + 1 && top + 1 < o.y + o.k.h - 1;
   };
 
   function step(dt: number) {
     const before = score();
-    speed = Math.min(170, speed + 2 * dt); // farten ökar sakta
+    speed = Math.min(V_MAX, speed + ACC * dt);
     dist += speed * dt;
     if (y > 0 || vy > 0) {
-      vy -= 900 * dt;
+      vy -= GRAV * dt;
       y = Math.max(0, y + vy * dt);
       if (y === 0) vy = 0;
     }
-    for (const o of obs) o.x -= speed * dt;
+    for (const o of obs) {
+      o.x -= speed * dt;
+      // Dykfågeln: från HIGH ner till huvudhöjd, klar vid d = dive
+      if (o.k.dive !== undefined) {
+        const f = Math.min(1, Math.max(0, (o.x - RX - 6 - o.k.dive) / 60));
+        o.y = LOW - (LOW - HIGH) * f;
+      }
+    }
     obs = obs.filter((o) => o.x > -16);
     gap -= speed * dt;
-    if (gap <= 0) {
-      spawn();
-      gap = speed * (0.9 + Math.random() * 0.9) + 30;
-    }
+    if (gap <= 0) spawn();
     if (inv > 0) inv -= dt;
     else if (obs.some(hit)) {
       lives--;
@@ -224,12 +322,13 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, onBest: 
 
   const start = () => {
     y = vy = dist = 0;
-    speed = 70;
+    speed = V_START;
     gap = 60;
+    next = "bush";
     lives = LIVES;
     inv = 0;
     obs = [];
-    say("Spelet har startat. Tryck för att hoppa.");
+    say("Tryck för att hoppa.");
     run();
   };
 
@@ -261,7 +360,7 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, onBest: 
 
   const jump = () => {
     if (y > 0) return;
-    vy = 260;
+    vy = V0;
     y = 0.01;
     jumps++;
     sync();
@@ -301,6 +400,15 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, onBest: 
   // Pausa när spelet inte syns eller fliken döljs; fortsätter bara på tryck
   new IntersectionObserver(([en]) => en.isIntersecting || pause(), { threshold: 0.3 }).observe(el);
   document.addEventListener("visibilitychange", () => document.hidden && pause());
+
+  // Testkrok: finns window.__gameHook (sätts bara av testsviten) får den läsa
+  // gubbens höjd, hindren och farten. Hopp görs ändå via riktiga tryck.
+  (window as unknown as { __gameHook?: (api: object) => void }).__gameHook?.({
+    y: () => y,
+    obs: () => obs,
+    v: () => speed,
+    win: jumpWindow,
+  });
 
   window.addEventListener("resize", resize);
   // Pixelfonten laddas asynkront (se <head>): rita om när den kommit, annars står
