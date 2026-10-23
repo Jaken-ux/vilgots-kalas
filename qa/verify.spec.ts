@@ -95,7 +95,7 @@ test.describe("Definition of Done", () => {
     const checks = [
       ".title", ".hud", ".press-start", "#when-box", "#countdown", "#where-scene",
       "#beat-gaming", "#beat-snacks", "#beat-bring", "#act-bonus .act-title", "#game",
-      "#rsvp-form", ".hiscore", ".outro-controls",
+      "#rsvp-form", "#act-outro .hiscore", ".outro-controls",
     ];
     for (const sel of checks) {
       const opacity = await page.locator(sel).evaluate((el) => parseFloat(getComputedStyle(el).opacity));
@@ -299,7 +299,7 @@ test.describe("Definition of Done", () => {
       await page.locator(sel).scrollIntoViewIfNeeded();
       await page.waitForTimeout(400);
     }
-    for (const sel of [".title", "#when-box", "#beat-bring", ".hiscore"]) {
+    for (const sel of [".title", "#when-box", "#beat-bring", "#act-outro .hiscore"]) {
       await expect
         .poll(() => page.locator(sel).evaluate((el) => parseFloat(getComputedStyle(el).opacity)))
         .toBeGreaterThanOrEqual(0.95);
@@ -946,7 +946,7 @@ test.describe("Bonus level (minispel)", () => {
     await page.addInitScript(() => ((window as any).__sfx = []));
     const errors = trackErrors(page);
     await openGame(page);
-    await expect(page.locator("#hs-record-row")).toBeHidden(); // inget rekord än
+    await expect(page.locator("#board-list .hs-local")).toHaveCount(0); // inget rekord än
 
     const game = page.locator("#game");
     await game.tap();
@@ -976,8 +976,7 @@ test.describe("Bonus level (minispel)", () => {
     await game.screenshot({ path: path.join(QA_DIR, "screenshot-game-over.png") });
 
     expect(await page.evaluate(() => localStorage.getItem("vilgots-kalas-best"))).toBe(String(score));
-    await expect(page.locator("#hs-record-row")).toBeVisible();
-    await expect(page.locator("#hs-record-row")).toHaveText(`Ditt rekord: ${score}`);
+    await expect(page.locator("#board-list .hs-local")).toHaveText(`Ditt rekord: ${score}`);
 
     // Efter spärren startar ett tryck om spelet
     await page.waitForTimeout(800);
@@ -988,11 +987,8 @@ test.describe("Bonus level (minispel)", () => {
     for (const url of ["/?g=Emma", "/?reset=1"]) {
       await page.goto(url);
       await page.waitForLoadState("networkidle");
-      await expect(page.locator("#hs-record-row"), url).toHaveText(`Ditt rekord: ${score}`);
+      await expect(page.locator("#board-list .hs-local"), url).toHaveText(`Ditt rekord: ${score}`);
     }
-    await page.locator("#act-outro").scrollIntoViewIfNeeded();
-    await page.waitForTimeout(1200);
-    await page.screenshot({ path: path.join(QA_DIR, "screenshot-outro-record.png") });
     expect(errors).toEqual([]);
   });
 
@@ -1261,13 +1257,20 @@ test.describe("Topplista (Firebase mockad)", () => {
     await expect.poll(() => chunks.length).toBe(1);
   });
 
-  test("Firebase is also loaded when the high score section comes into view", async ({ page }) => {
+  test("Firebase is also loaded when the Bonus level section comes into view – not by the outro", async ({ page }) => {
     const chunks: string[] = [];
     page.on("request", (r) => r.url().includes("firebase-backend") && chunks.push(r.url()));
     await page.goto("/");
     await page.waitForLoadState("networkidle");
     expect(chunks).toEqual([]);
-    await page.locator("#act-outro").scrollIntoViewIfNeeded();
+    // Hoppa förbi Bonus level direkt till outron (instant scroll, ingen passage)
+    await page.evaluate(() => {
+      document.documentElement.style.scrollBehavior = "auto";
+      window.scrollTo(0, document.documentElement.scrollHeight);
+    });
+    await page.waitForTimeout(1000);
+    expect(chunks).toEqual([]);
+    await page.locator("#act-bonus").scrollIntoViewIfNeeded();
     await expect.poll(() => chunks.length).toBe(1);
   });
 
@@ -1322,10 +1325,10 @@ test.describe("Topplista (Firebase mockad)", () => {
     await page.waitForTimeout(300);
     await page.locator(".game-wrap").screenshot({ path: path.join(QA_DIR, "screenshot-board-gameover.png") });
 
-    // Outrolistan: sorterad, egen rad markerad
-    await page.locator("#act-outro").scrollIntoViewIfNeeded();
-    await page.waitForTimeout(1500);
-    const rows = await page.$$eval(".hiscore .hs-row", (li) =>
+    // Postat: listan under spelet fälls ut av sig själv – sorterad, egen rad markerad
+    await expect(page.locator("#board-list")).toBeVisible();
+    await expect(page.locator("#board-toggle")).toHaveAttribute("aria-expanded", "true");
+    const rows = await page.$$eval("#board-list .hs-row", (li) =>
       li.map((l) => [l.querySelector(".hs-rank")!.textContent, l.querySelector(".hs-name")!.textContent, l.querySelector(".hs-score")!.textContent, l.classList.contains("hs-me")])
     );
     expect(rows).toEqual([
@@ -1333,7 +1336,11 @@ test.describe("Topplista (Firebase mockad)", () => {
       ["2", "Vilgot", String(score), true],
       ["3", "Bo", "3", false],
     ]);
-    await page.screenshot({ path: path.join(QA_DIR, "screenshot-board-outro.png") });
+    await page.locator("#board").screenshot({ path: path.join(QA_DIR, "screenshot-board-list.png") });
+    // Outron är statisk: ingen koppling till topplistan
+    const outro = await page.$$eval("#act-outro .hiscore .hs-name", (n) => n.map((x) => x.textContent));
+    expect(outro).toEqual(["Vilgot", "Du?_"]); // "_" = den blinkande markören
+    await expect(page.locator("#act-outro .hs-me, #act-outro .hs-note")).toHaveCount(0);
   });
 
   test("'Posta alltid' is saved per guest and then skips the question", async ({ page }) => {
@@ -1372,12 +1379,13 @@ test.describe("Topplista (Firebase mockad)", () => {
     await fakeBoard(page, initial);
     await page.goto("/?g=Vilgot");
     await page.waitForLoadState("networkidle");
-    await page.locator("#act-outro").scrollIntoViewIfNeeded();
-    await expect(page.locator(".hiscore")).toHaveAttribute("data-board", "ok");
-    const names = await page.$$eval(".hiscore .hs-row .hs-name", (n) => n.map((x) => x.textContent));
+    await page.locator("#act-bonus").scrollIntoViewIfNeeded();
+    await expect(page.locator("#board-list")).toHaveAttribute("data-board", "ok");
+    await page.locator("#board-toggle").click();
+    const names = await page.$$eval("#board-list .hs-row .hs-name", (n) => n.map((x) => x.textContent));
     expect(names.slice(0, 10)).toEqual(Array.from({ length: 10 }, (_, i) => `Gäst ${i}`));
     expect(names.slice(10)).toEqual(["…", "Vilgot"]);
-    await expect(page.locator(".hiscore .hs-me .hs-rank")).toHaveText("12");
+    await expect(page.locator("#board-list .hs-me .hs-rank")).toHaveText("12");
 
     // Någon annan tar förstaplatsen
     await page.evaluate(() => {
@@ -1386,7 +1394,7 @@ test.describe("Topplista (Firebase mockad)", () => {
     });
     await expect(page.locator(".levelup")).toHaveText("NEW HIGH SCORE!");
     expect(await page.evaluate(() => (window as any).__sfx)).toContain("chest");
-    await expect(page.locator(".hiscore .hs-row").first().locator(".hs-name")).toHaveText("Gäst 5");
+    await expect(page.locator("#board-list .hs-row").first().locator(".hs-name")).toHaveText("Gäst 5");
     // Ingen fanfar när någon längre ner förbättrar sig
     await page.waitForTimeout(2500);
     await page.evaluate(() => {
@@ -1405,8 +1413,10 @@ test.describe("Topplista (Firebase mockad)", () => {
     await expect(page.locator("#board-status")).toContainText("Topplistan svarar inte");
     await expect(page.locator("#board-status")).toContainText("Ditt rekord:");
     await expect(panel(page)).toBeHidden(); // ingen fråga när listan inte går att nå
-    await expect(page.locator(".hiscore")).toHaveAttribute("data-board", "fail");
-    await expect(page.locator("#hs-record-row")).toBeVisible(); // lokalt rekord i outron
+    await expect(page.locator("#board-list")).toHaveAttribute("data-board", "fail");
+    // Panelen visar felet och webbläsarens eget rekord
+    await expect(page.locator("#board-list .hs-error")).toHaveText("Topplistan svarar inte just nu");
+    await expect(page.locator("#board-list .hs-local")).toContainText("Ditt rekord:");
 
     const page2 = await page.context().newPage();
     const errors2 = trackErrors(page2);
@@ -1428,10 +1438,48 @@ test.describe("Topplista (Firebase mockad)", () => {
     const pageErrors: string[] = [];
     page.on("pageerror", (e) => pageErrors.push(e.message));
     await playToGameOver(page, "/?g=Vilgot");
-    await expect(page.locator(".hiscore")).toHaveAttribute("data-board", "fail", { timeout: 8000 });
+    await expect(page.locator("#board-list")).toHaveAttribute("data-board", "fail", { timeout: 8000 });
     await expect(page.locator("#board-status")).toContainText("Topplistan svarar inte");
     await expect(panel(page)).toBeHidden();
     expect(pageErrors).toEqual([]);
     expect(firebaseCalls, "SDK:n försökte nå Firebase men stoppades").toBeGreaterThan(0);
+  });
+
+  test("collapsible panel: header always shown, tap toggles, state saved; no panel without JS", async ({ page, browser }) => {
+    await fakeBoard(page, { vilgot: { name: "Vilgot", score: 40, updatedAt: 1 }, a: { name: "Anna", score: 90, updatedAt: 1 } });
+    await page.goto("/?g=Vilgot");
+    await page.waitForLoadState("networkidle");
+    await page.locator("#act-bonus").scrollIntoViewIfNeeded();
+    const toggle = page.locator("#board-toggle");
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toContainText("High score");
+    await expect(toggle).toHaveAttribute("aria-expanded", "false"); // stängd som standard
+    await expect(page.locator("#board-list")).toBeHidden();
+    await page.locator("#game").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(1200);
+    await page.locator(".game-wrap").screenshot({ path: path.join(QA_DIR, "screenshot-board-closed.png") });
+    await page.locator("#board").screenshot({ path: path.join(QA_DIR, "screenshot-board-header.png") });
+
+    await toggle.click();
+    await expect(page.locator("#board-list")).toBeVisible();
+    await expect(page.locator("#board-list .hs-me .hs-name")).toHaveText("Vilgot");
+    expect(await page.evaluate(() => localStorage.getItem("vilgots-kalas-board-open"))).toBe("1");
+    await page.locator("#board").screenshot({ path: path.join(QA_DIR, "screenshot-board-open.png") });
+
+    // Kommer ihåg utfällt läge
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    await expect(page.locator("#board-list")).toBeVisible();
+    await page.locator("#board-toggle").click();
+    await expect(page.locator("#board-list")).toBeHidden();
+    expect(await page.evaluate(() => localStorage.getItem("vilgots-kalas-board-open"))).toBe("0");
+
+    // Utan JS: ingen panel (listan kräver JS), outron statisk
+    const ctx = await browser.newContext({ javaScriptEnabled: false });
+    const p2 = await ctx.newPage();
+    await p2.goto("/");
+    await expect(p2.locator("#board")).toBeHidden();
+    await expect(p2.locator("#act-outro .hiscore .hs-name").first()).toHaveText("Vilgot");
+    await ctx.close();
   });
 });

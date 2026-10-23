@@ -982,16 +982,10 @@ function handleReset(): boolean {
 }
 
 // ===== BONUS LEVEL (minispelet i src/game.ts) =====
-// Bästa poängen visas under Vilgot i high score-listan när det finns en
-function showRecord(n: number) {
-  $("#hs-record").textContent = String(n);
-  $("#hs-record-row").hidden = false;
-}
 
-// Topplistan (src/leaderboard.ts) laddar Firebase vid första spelstart eller när
-// high score-delen syns – aldrig vid sidladdning
+// Topplistan (src/leaderboard.ts) ligger under spelet och laddar Firebase vid
+// första spelstart eller när Bonus level syns – aldrig vid sidladdning
 function initBonus() {
-  if (bestScore() > 0) showRecord(bestScore());
   const board = initLeaderboard({
     guest: guestName(),
     play: (s) => playSound(s),
@@ -1000,10 +994,7 @@ function initBonus() {
   });
   const game = initGame($("#game"), (s) => playSound(s), {
     onStart: board.connect,
-    onOver: (score, best) => {
-      if (best) showRecord(score);
-      board.over(score);
-    },
+    onOver: (score) => board.over(score),
   });
   board.attach(game);
 }

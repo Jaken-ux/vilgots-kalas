@@ -1,7 +1,8 @@
 // Delad topplista för minispelet (Firebase Realtime Database, /scores).
 // OPT-IN: inget postas utan att gästen svarat "Ja!" eller kryssat "Posta alltid".
-// Firebase laddas först när den behövs (första spelstart eller när high
-// score-delen syns), aldrig vid sidladdning. Allt är inlindat i try/catch och
+// Listan ligger i en utfällbar panel direkt under spelet (#board). Firebase
+// laddas först när den behövs (första spelstart eller när Bonus level-sektionen
+// syns), aldrig vid sidladdning. Allt är inlindat i try/catch och
 // tidsgränser: svarar eller nekar Firebase visas det lokala rekordet i stället.
 import { content } from "./content";
 import { PALETTE } from "./sprites";
@@ -25,6 +26,7 @@ export interface Backend {
 export const MAX_SCORE = 99999;
 const TIMEOUT_MS = 5000;
 const AUTO_KEY = "vilgots-kalas-autopost"; // + ":<gäst>", per gäst
+const OPEN_KEY = "vilgots-kalas-board-open"; // utfälld panel, per webbläsare
 
 // Gästens nyckel (gemener) och visningsnamn – bara om ?g-namnet finns i gästlistan
 export function guestIdentity(g: string): { key: string; name: string } | null {
@@ -77,8 +79,9 @@ interface Options {
 
 export function initLeaderboard(opts: Options) {
   const me = guestIdentity(opts.guest);
-  const list = document.querySelector<HTMLOListElement>(".hiscore");
-  const recordRow = document.getElementById("hs-record-row");
+  const board = document.getElementById("board");
+  const toggle = document.getElementById("board-toggle");
+  const list = document.getElementById("board-list") as HTMLOListElement | null;
   const panel = document.getElementById("game-panel");
   const yes = document.getElementById("btn-post-yes");
   const no = document.getElementById("btn-post-no");
@@ -101,7 +104,26 @@ export function initLeaderboard(opts: Options) {
     }
   };
 
-  // ----- Topplistan i high score-delen -----
+  // ----- Utfällbar panel under spelet -----
+  const setOpen = (open: boolean) => {
+    if (!list || !toggle) return;
+    list.hidden = !open;
+    toggle.setAttribute("aria-expanded", String(open));
+    try {
+      localStorage.setItem(OPEN_KEY, open ? "1" : "0");
+    } catch {
+      // Privat läge: läget sparas inte
+    }
+  };
+  const savedOpen = () => {
+    try {
+      return localStorage.getItem(OPEN_KEY) === "1";
+    } catch {
+      return false;
+    }
+  };
+
+  // ----- Listan -----
   const row = (rank: string, name: string, score: string, cls = "") => {
     const li = document.createElement("li");
     li.className = `hs-row ${cls}`;
@@ -115,18 +137,35 @@ export function initLeaderboard(opts: Options) {
     return li;
   };
 
-  // Utan poster står den statiska listan (Vilgot – 10 år, Du?) kvar
+  // En rad med bara text (laddar, fel, tips, lokalt rekord)
+  const note = (text: string, cls = "") => {
+    const li = document.createElement("li");
+    li.className = `hs-note ${cls}`;
+    li.textContent = text;
+    return li;
+  };
+
+  // Topp 10, egen rad markerad (och egen placering under om den är längre ner).
+  // Webbläsarens eget rekord står alltid sist – det är också reserven när
+  // Firebase inte svarar.
   const renderList = () => {
-    if (!list || !rows.length) return;
-    const items: HTMLElement[] = rows.slice(0, 10).map((r) =>
-      row(String(r.rank), pixelSafe(r.name), String(r.score), r.key === me?.key ? "hs-me" : "")
-    );
-    const mine = me && rows.find((r) => r.key === me.key);
-    if (mine && mine.rank > 10) items.push(row("", "…", ""), row(String(mine.rank), pixelSafe(mine.name), String(mine.score), "hs-me"));
-    if (!mine) items.push(row(String(rows.length + 1), "Du?", "???", "hs-you"));
-    if (recordRow) items.push(recordRow);
+    if (!list) return;
+    const items: HTMLElement[] = [];
+    if (status === "off" || status === "loading") items.push(note("Laddar topplistan…"));
+    else if (status === "fail") items.push(note("Topplistan svarar inte just nu", "hs-error"));
+    else {
+      for (const r of rows.slice(0, 10)) {
+        items.push(row(String(r.rank), pixelSafe(r.name), String(r.score), r.key === me?.key ? "hs-me" : ""));
+      }
+      const mine = me && rows.find((r) => r.key === me.key);
+      if (mine && mine.rank > 10) items.push(row("", "…", ""), row(String(mine.rank), pixelSafe(mine.name), String(mine.score), "hs-me"));
+      if (!rows.length) items.push(note("Ingen på listan än – bli först!"));
+      if (me && !mine) items.push(row(String(rows.length + 1), "Du?", "???", "hs-you"));
+      if (!me) items.push(note("Öppna din egen länk för att hamna på listan"));
+    }
+    const best = opts.localBest();
+    if (best > 0) items.push(note(`Ditt rekord: ${best}`, "hs-local"));
     list.replaceChildren(...items);
-    list.dataset.live = "true";
   };
 
   // ----- Topp 3 och egen placering på game over-skärmen -----
@@ -173,6 +212,7 @@ export function initLeaderboard(opts: Options) {
 
   const fail = () => {
     setStatus("fail");
+    renderList();
     renderInfo();
   };
 
@@ -181,6 +221,7 @@ export function initLeaderboard(opts: Options) {
   const connect = () => {
     if (status !== "off") return;
     setStatus("loading");
+    renderList();
     const timer = setTimeout(() => status === "loading" && fail(), TIMEOUT_MS);
     const fake = (window as unknown as { __leaderboardBackend?: Backend }).__leaderboardBackend;
     (fake ? Promise.resolve(fake) : import("./firebase-backend").then((m) => m.createBackend()))
@@ -210,12 +251,22 @@ export function initLeaderboard(opts: Options) {
   const post = async (score: number) => {
     if (!me || !backend) return;
     postFailed = false;
+    let posted = false;
     try {
-      await withTimeout(backend.post(me.key, { name: me.name, score: Math.min(score, MAX_SCORE) }));
+      posted = await withTimeout(backend.post(me.key, { name: me.name, score: Math.min(score, MAX_SCORE) }));
     } catch {
       postFailed = true; // nekad, nätet nere eller timeout: lokalt rekord gäller
     }
     renderInfo();
+    if (!posted) return;
+    // Postat: fäll ut listan och visa den egna raden om den inte syns
+    setOpen(true);
+    const mine = list?.querySelector(".hs-me");
+    const r = mine?.getBoundingClientRect();
+    if (mine && r && (r.bottom > window.innerHeight || r.top < 0)) {
+      const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      mine.scrollIntoView({ block: "nearest", behavior: reduced ? "auto" : "smooth" });
+    }
   };
 
   const closePanel = () => {
@@ -235,14 +286,23 @@ export function initLeaderboard(opts: Options) {
   });
   no?.addEventListener("click", closePanel);
 
-  // High score-delen i bild laddar också topplistan (alla ska se den)
-  if (list && "IntersectionObserver" in window) {
+  // Panelen syns bara med JS (topplistan kräver det); utfällt läge från förra gången
+  if (board && toggle && list) {
+    board.hidden = false;
+    setOpen(savedOpen());
+    toggle.addEventListener("click", () => setOpen(list.hidden));
+    renderList();
+  }
+
+  // Bonus level-sektionen i bild laddar också topplistan (alla ska se den)
+  const section = document.getElementById("act-bonus");
+  if (section && "IntersectionObserver" in window) {
     const io = new IntersectionObserver(([e]) => {
       if (!e.isIntersecting) return;
       io.disconnect();
       connect();
     });
-    io.observe(list);
+    io.observe(section);
   }
 
   return {
@@ -254,6 +314,7 @@ export function initLeaderboard(opts: Options) {
     over(score: number) {
       lastOver = score;
       postFailed = false;
+      renderList(); // webbläsarens rekord kan ha ändrats
       renderInfo();
       if (!me || status !== "ok" || !panel) return;
       const mine = rows.find((r) => r.key === me.key);

@@ -10,9 +10,9 @@ Mobilanpassad, ensidig inbjudningssida till Vilgots 10-årskalas (gamingkalas). 
 | När (`#act-when`) | Datum, tid, nedräkning som mynträkneverk | – |
 | Var (`#act-where`) | Skylt och skattkista | Skylten vecklar ut en skattkarta med adress och kartlänkar. Kistan öppnas med ett regn av pixelmynt |
 | Vad händer (`#act-program`) | Gaming, snacks, ta med (egen ruta) | – |
-| Bonus level (`#act-bonus`) | Minispel i `<canvas>` (src/game.ts) | Tryck startar, tryck = hopp över buskar, block och fåglar. Tre liv. Bästa poäng visas i high score |
+| Bonus level (`#act-bonus`) | Minispel i `<canvas>` (src/game.ts) och topplistan under det | Tryck startar, tryck = hopp över buskar, block och fåglar. Tre liv. Under spelet: utfällbar "HIGH SCORE"-panel med den delade topplistan |
 | OSA (`#act-rsvp`) | Formuläret | Ja ger pixelkonfetti och "LEVEL UP!" |
-| High score (`#act-outro`) | "Vilgot – 10 år", "Ditt rekord: N" (när minispelet spelats) och "Du?" | Ljud av/på |
+| High score (`#act-outro`) | "Vilgot – 10 år" och "Du?" (statisk dekoration, ingen koppling till topplistan) | Ljud av/på |
 
 ## Köra lokalt
 
@@ -67,10 +67,15 @@ Minispelet har en delad topplista i Firebase Realtime Database under `/scores/<g
 - **Bara opt-in.** Inget postas utan att gästen trycker "Ja!" i frågan "Nytt rekord! Posta på leaderboarden?", eller tidigare har kryssat "Posta alltid". Det valet sparas per gäst i `localStorage` (`vilgots-kalas-autopost:<gäst>`).
 - **Identitet.** Gästens identitet är `?g`-namnet, men bara om det finns i `guests` i `src/content.ts` (gemener jämförs). Utan giltigt `?g` fungerar spelet som förut med lokalt rekord, och game over-skärmen visar "Öppna din egen länk för att hamna på listan".
 - **När frågan visas.** Frågan kommer när poängen slår gästens plats på listan och är högst hittills i sessionen. Ett nej frågas alltså inte om igen för en lägre poäng.
-- **Topplistan i high score-delen** är levande: topp 10, egen rad markerad och egen placering under om den är längre ner. Utan poster står den statiska listan kvar. Tar någon förstaplatsen spelas en fanfar och "NEW HIGH SCORE!" visas.
+- **Topplistan ligger direkt under spelet** som en utfällbar panel (`#board`). Rubriken "HIGH SCORE" med en pixelpil syns alltid och växlar färg i pixelsteg. Ett tryck fäller ut listan: topp 10, egen rad markerad, egen placering under om den är längre ner, och webbläsarens eget rekord sist.
+  - Utfällt läge sparas i `localStorage` (`vilgots-kalas-board-open`).
+  - När en poäng har postats fälls listan ut av sig själv, och den egna raden scrollas fram om den inte syns.
+  - Tar någon förstaplatsen spelas en fanfar och "NEW HIGH SCORE!" visas.
+  - Panelen syns bara med JS.
+- **Outron** ("Vilgot – 10 år", "Du?") är statisk dekoration utan koppling till Firebase.
 - **På game over-skärmen** visas topp 3 och den egna placeringen.
-- **Laddning.** Firebase laddas först vid första spelstart eller när high score-delen syns, aldrig vid sidladdning. Firebase-chunken är 223,5 kB (49,5 kB gzip), och huvudbundlen växte med 5,6 kB.
-- **Fel.** Svarar Firebase inte inom 5 s, eller nekar, visas det lokala rekordet. Inget kraschar.
+- **Laddning.** Firebase laddas först vid första spelstart eller när Bonus level-sektionen syns, aldrig vid sidladdning. Firebase-chunken är 223,5 kB (49,5 kB gzip), och huvudbundlen växte med 5,6 kB.
+- **Fel.** Svarar Firebase inte inom 5 s, eller nekar, visar panelen "Topplistan svarar inte just nu" och det lokala rekordet. Inget kraschar.
 
 ### Databasreglerna – gör om varje gång `guests` ändras
 

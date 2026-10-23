@@ -2,6 +2,26 @@
 
 Nyast överst. Projektet är en kopia av Livias kalas. Posterna före 2026-10-23 kommer därifrån och gäller den ärvda koden.
 
+## 2026-10-24 — Topplistan flyttad till en utfällbar panel under spelet
+Topplistan ligger nu direkt under spelet i Bonus level (`#board`), inte i outron. Detta ersätter "Laddning" och "Visning" i posten nedan.
+
+**Panelen:**
+- Rubriken "HIGH SCORE" med pil syns alltid, och ett tryck fäller ut topp 10.
+- Utfällt läge sparas per webbläsare (`vilgots-kalas-board-open`) och är stängt som standard.
+- Efter en *postad* poäng fälls panelen ut av sig själv och den egna raden scrollas fram om den inte syns. Ett nej eller en nekad post fäller inte ut den.
+
+**Webbläsarens rekord** ("Ditt rekord") flyttade från outron till panelen, där det också är reserv när Firebase inte svarar.
+
+**Outron** visar bara den statiska "Vilgot – 10 år" och "Du?", utan Firebase.
+
+**Laddning:** Firebase laddas vid spelstart eller när Bonus level-sektionen syns. Ett test kontrollerar att ett hopp direkt till outron inte laddar Firebase.
+
+**Pilen** ritas med CSS. ▼ saknas i pixelfonten och blev pytteliten.
+
+**Panelen syns bara med JS:** den är dold i HTML, eftersom listan ändå kräver JS och Firebase.
+
+Huvudbundlen 162,08 kB (+1,0 kB mot förra committen). Lighthouse mobil: 98, 98, 96. Commit: "Move leaderboard under game".
+
 ## 2026-10-24 — Delad topplista i Firebase, opt-in
 Topplistan för minispelet ligger i Realtime Database under `/scores/<gäst i gemener>`, och identiteten är `?g`-namnet om det finns i `content.guests`. Inget postas utan "Ja!" eller "Posta alltid" (sparas per gäst).
 

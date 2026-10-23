@@ -242,6 +242,13 @@
         <p class="sr-only" id="game-status" aria-live="polite"></p>
         <!-- Topplistan på game over-skärmen som text (canvasen syns inte för skärmläsare) -->
         <p class="sr-only" id="board-status" aria-live="polite"></p>
+        <!-- Topplistan: utfällbar panel under spelet (src/leaderboard.ts). Visas bara med JS. -->
+        <div class="board" id="board" hidden>
+          <button type="button" class="board-toggle" id="board-toggle" aria-expanded="false" aria-controls="board-list">
+            <span class="board-title">High score</span><span class="board-arrow" aria-hidden="true"></span>
+          </button>
+          <ol class="hiscore board-list" id="board-list" hidden></ol>
+        </div>
         <noscript><p class="bonus-hint">Spelet behöver JavaScript.</p></noscript>
       </div>
     </section>
@@ -314,7 +321,6 @@
         <h2 class="hs-title credits-line">High score</h2>
         <ol class="hiscore credits-line">
           <li class="hs-row hs-top"><span class="hs-rank">1</span><span class="hs-name" id="hs-name"></span><span class="hs-dots" aria-hidden="true"></span><span class="hs-score" id="hs-score"></span></li>
-          <li class="hs-record" id="hs-record-row" hidden>Ditt rekord: <span id="hs-record"></span></li>
           <li class="hs-row hs-you"><span class="hs-rank">2</span><span class="hs-name">Du?<span class="hs-cursor" aria-hidden="true">_</span></span><span class="hs-dots" aria-hidden="true"></span><span class="hs-score">???</span></li>
         </ol>
         <p class="credits-line credits-big" id="outro-see-you"></p>

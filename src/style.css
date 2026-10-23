@@ -1037,6 +1037,51 @@ h1, h2, .act-title {
   image-rendering: pixelated;
 }
 
+/* Topplistan under spelet: rubriken med pil syns alltid, listan fälls ut */
+.board {
+  max-width: 340px;
+  margin: 1.6rem auto 0;
+}
+
+.board-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 0.6rem;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-family: var(--font-pixel);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  text-shadow: 3px 3px 0 var(--ink);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  animation: rainbow 2.4s steps(1) infinite;
+}
+
+.board-toggle:focus-visible {
+  outline: 3px solid var(--neon);
+}
+
+/* Pixelpil i textens färg (▼ finns inte i pixelfonten och blir pytteliten) */
+.board-arrow {
+  display: inline-block;
+  width: 14px;
+  height: 8px;
+  background: currentColor;
+  clip-path: polygon(0 0, 100% 0, 100% 2px, 12px 2px, 12px 4px, 10px 4px, 10px 6px, 8px 6px, 8px 8px,
+    6px 8px, 6px 6px, 4px 6px, 4px 4px, 2px 4px, 2px 2px, 0 2px);
+}
+
+.board-toggle[aria-expanded="true"] .board-arrow {
+  transform: rotate(180deg);
+}
+
+.board-list {
+  margin: 0.6rem auto 0;
+}
+
 /* ===== OSA ("bossen") ===== */
 .act-rsvp {
   background: #12091C;
@@ -1350,11 +1395,20 @@ h1, h2, .act-title {
   content: " ◀";
 }
 
-/* Rekordet från minispelet, direkt under Vilgot */
-.hs-record {
-  margin: -0.4rem 0 0.4rem 2.2rem;
+/* Textrader i topplistan: laddar, fel, tips, webbläsarens rekord */
+.hs-note {
+  padding: 0.5rem 0;
   font-size: 0.6rem;
+  line-height: 1.7;
   text-transform: none;
+  color: var(--text-dim);
+}
+
+.hs-note.hs-error {
+  color: var(--red);
+}
+
+.hs-note.hs-local {
   color: var(--sky);
 }
 
