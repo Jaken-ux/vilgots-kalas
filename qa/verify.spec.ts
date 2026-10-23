@@ -2,7 +2,8 @@ import { test, expect, devices } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { KINDS, jumpWindow, minGap, nextGap } from "../src/game";
+import { KINDS, jumpWindow, minGap, nextGap, vAt, SIGHT, density } from "../src/game";
+import { ENVS } from "../src/levels";
 import { ranking, guestIdentity, pixelSafe } from "../src/leaderboard";
 // @ts-expect-error – .mjs utan typer
 import { buildRules } from "../scripts/gen-rules.mjs";
@@ -1068,48 +1069,88 @@ test.describe("Bonus level (minispel)", () => {
   });
 });
 
-test.describe("Bonus level: svårighet och rättvisa", () => {
+test.describe("Bonus level: svårighet, levels och rättvisa", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
-  // Ren fysik, ingen webbläsare: varje hinder går att klara vid alla farter, och
-  // slumpat avstånd är aldrig kortare än det fysiska minimumet
-  test("every obstacle has a jump window and every gap is clearable, 70–212 px/s", () => {
-    const kinds = Object.values(KINDS);
-    for (let v = 70; v <= 212; v += 2) {
-      for (const a of kinds) {
-        const [lo, hi] = jumpWindow(a, v);
-        if (!a.stand) expect(hi - lo, `fönster v=${v}`).toBeGreaterThan(10);
-        for (const b of kinds) {
-          for (const r of [0, 0.5, 1]) {
-            expect(nextGap(a, b, v, r, false)).toBeGreaterThanOrEqual(minGap(a, b, v) + 6);
-          }
-          // Par (två låga): andra hoppet direkt vid landning, och aldrig under minimum
-          if (a.pair && b.pair) {
-            const g = nextGap(a, b, v, 0, true);
-            expect(g).toBeGreaterThanOrEqual(minGap(a, b, v));
-            expect(g).toBeLessThan(v * 0.65 + 10); // tätt: ungefär en hopplängd
+  // Ren fysik, ingen webbläsare. I varje miljö: varje hinder går att klara från
+  // farten där miljön först dyker upp och ända upp till synlighetsgränsen, och
+  // slumpat avstånd är aldrig kortare än det fysiska minimumet – oavsett täthet.
+  test("every obstacle in every environment has a jump window and every gap is clearable", () => {
+    const limit = (k: (typeof KINDS)["pillar"]) => {
+      let v = 70;
+      while (jumpWindow(k, v)[0] <= SIGHT) v++;
+      return v;
+    };
+    // Avvikelser samlas och kontrolleras en gång (100 000 enskilda expect tog 14 min)
+    const bad: string[] = [];
+    ENVS.forEach((env, i) => {
+      // Samma höjdklasser överallt: låg 6/8, mellan 16, hög 28, flygare i huvudhöjd
+      expect([env.kinds.bush.h, env.kinds.block.h, env.kinds.big.h, env.kinds.pillar.h], env.name).toEqual([6, 8, 16, 28]);
+      expect([env.kinds.bird.y, env.kinds.dive.y], env.name).toEqual([KINDS.bird.y, KINDS.dive.y]);
+      const kinds = Object.entries(env.kinds);
+      for (let v = Math.floor(vAt(i * 30)); v < limit(env.kinds.pillar); v += 10) {
+        for (const [an, a] of kinds) {
+          const [lo, hi] = jumpWindow(a, v);
+          if (!a.stand && hi - lo <= 10) bad.push(`${env.name} ${an} fönster ${(hi - lo).toFixed(1)} px vid v=${v}`);
+          for (const [bn, b] of kinds) {
+            const min = minGap(a, b, v);
+            for (const dens of [1, density(150), density(200)]) {
+              for (const r of [0, 1]) {
+                if (nextGap(a, b, v, r, false, dens) < min + 6) bad.push(`${env.name} ${an}→${bn} v=${v} täthet ${dens}`);
+              }
+            }
+            if (a.pair && b.pair && nextGap(a, b, v, 0, true) < min) bad.push(`${env.name} par ${an}→${bn} v=${v}`);
           }
         }
       }
-    }
-    // Tre höjder på markhindren
-    expect([KINDS.bush.h, KINDS.big.h, KINDS.pillar.h]).toEqual([6, 16, 28]);
+    });
+    expect(bad).toEqual([]);
     expect(KINDS.pillar.w).toBeLessThan(KINDS.bush.w);
+    // Tätheten ökar med tiden och mer i varv 2
+    expect(density(0)).toBe(1);
+    expect(density(100)).toBeLessThan(density(50));
+    expect(density(130)).toBeLessThan(density(110) * 0.8);
+  });
+
+  // Fartkurvan: utan tak, och den höga klassen syns för sent först efter 180–195 s
+  test("speed has no cap and crosses the sight limit after 180–195 s", () => {
+    let t = 0;
+    while (jumpWindow(KINDS.pillar, vAt(t))[0] <= SIGHT) t += 0.5;
+    expect(t).toBeGreaterThan(180);
+    expect(t).toBeLessThan(195);
+    for (const env of ENVS) {
+      expect(jumpWindow(env.kinds.pillar, vAt(t))[0], env.name).toBeGreaterThan(SIGHT);
+    }
+    expect(vAt(300)).toBeGreaterThan(vAt(240)); // inget tak
+    // Verklig gräns för en spelare med 60 bildrutor/s: hindret hinner flytta sig
+    // en bildruta (v/60) innan det första gången syns
+    let te = 0;
+    while (jumpWindow(KINDS.pillar, vAt(te))[0] <= SIGHT - vAt(te) / 60) te += 0.5;
+    expect(te).toBeGreaterThan(170);
+    expect(te).toBeLessThan(185);
   });
 
   // Boten körs inne i sidan och trycker via riktiga pointerdown på spelytan.
   // "Hoppa när hindret är X px bort", X = mitt i hoppfönstret vid aktuell fart.
-  const startBot = async (page: Page, jumpAtAll: boolean) => {
+  // __crash = speltid för varje krock, __maxLevel = högsta level.
+  const startBot = async (page: Page, jumpAtAll: boolean, url = "/") => {
     await page.addInitScript((jumpAtAll) => {
       const w = window as any;
       w.__kinds = [];
+      w.__crash = [];
+      w.__maxLevel = 0;
       w.__gameHook = (api: any) => {
+        w.__api = api;
         let prev: unknown = null;
+        let lives = 3;
         const tick = () => {
           const el = document.getElementById("game")!;
           const o = api.obs().find((o: any) => o.x + o.k.w > 26);
           if (o && o !== prev) w.__kinds.push(o.k);
           prev = o;
+          if (Number(el.dataset.lives) < lives) w.__crash.push(api.t());
+          lives = Number(el.dataset.lives);
+          w.__maxLevel = Math.max(w.__maxLevel, Number(el.dataset.level));
           if (jumpAtAll && el.dataset.state === "run" && api.y() === 0 && o && !o.k.stand) {
             const [lo, hi] = api.win(o.k, api.v());
             const d = o.x - 30;
@@ -1122,41 +1163,114 @@ test.describe("Bonus level: svårighet och rättvisa", () => {
         requestAnimationFrame(tick);
       };
     }, jumpAtAll);
-    await page.goto("/");
+    await page.goto(url);
     await page.waitForLoadState("networkidle");
-    await page.locator("#game").scrollIntoViewIfNeeded();
-    await page.waitForTimeout(1500); // scrollen har stannat (smooth)
+    // Utan mjuk scroll: ett tryck medan sidan scrollar stoppar bara scrollen
+    // (Kända fällor). Boten testar spelet, inte scrollningen.
+    await page.evaluate(() => {
+      document.documentElement.style.scrollBehavior = "auto";
+      document.getElementById("game")!.scrollIntoView({ block: "center" });
+    });
+    await page.waitForTimeout(300);
     await page.locator("#game").tap();
     expect(await page.getAttribute("#game", "data-state")).toBe("run");
   };
 
-  test("a bot that jumps at the right moment survives 60 s without a single crash", async ({ page }) => {
-    test.setTimeout(120000);
+  test("(a) a perfect bot reaches space, never crashes before ~3 min, and is game over within 3–4 min", async ({ page }) => {
+    test.setTimeout(330000);
     const errors = trackErrors(page);
     await startBot(page, true);
-    const t0 = Date.now();
-    while (Date.now() - t0 < 60000) {
-      expect(await page.getAttribute("#game", "data-state")).toBe("run");
-      expect(await page.getAttribute("#game", "data-lives"), `krock efter ${(Date.now() - t0) / 1000} s`).toBe("3");
-      await page.waitForTimeout(1000);
-    }
-    // Svårigheten var faktiskt med: alla markhöjder och minst en dykfågel. (En
-    // viss dykvariant uteblir i ~2 % av körningarna av ren slump; båda täcks
-    // deterministiskt av fysiktestet ovan.)
-    const seen: { h: number; dive?: number }[] = await page.evaluate(() => (window as any).__kinds);
-    const heights = new Set(seen.filter((k) => k.dive === undefined).map((k) => k.h));
-    expect([...heights].sort((a, b) => a - b)).toEqual(expect.arrayContaining([6, 8, 16, 28]));
-    expect(seen.some((k) => k.dive !== undefined), "dykfågel").toBe(true);
-    expect(Number(await page.getAttribute("#game", "data-score"))).toBeGreaterThan(900);
+    await expect
+      .poll(() => page.getAttribute("#game", "data-state"), { timeout: 300000, intervals: [2000] })
+      .toBe("over");
+    const r = await page.evaluate(() => {
+      const w = window as any;
+      return { crash: w.__crash as number[], level: w.__maxLevel as number, end: w.__api.t() as number, kinds: w.__kinds };
+    });
+    console.log(`perfekt bot: krockar vid ${r.crash.map((t) => t.toFixed(1)).join(", ")} s, game over vid ${r.end.toFixed(1)} s speltid, level ${r.level}`);
+    expect(r.level, "nådde rymden (level 4)").toBeGreaterThanOrEqual(4);
+    // Första krocken kommer när hindren syns för sent för en 60 fps-spelare (~177 s)
+    expect(r.crash[0], "ingen krock före ~3 min").toBeGreaterThan(170);
+    expect(r.end).toBeGreaterThan(180);
+    expect(r.end).toBeLessThan(240);
+    // Alla markhöjder och minst en dykare var med
+    const heights = new Set(r.kinds.filter((k: any) => k.dive === undefined).map((k: any) => k.h));
+    expect([...heights]).toEqual(expect.arrayContaining([6, 8, 16, 28]));
+    expect(r.kinds.some((k: any) => k.dive !== undefined), "dykare").toBe(true);
     expect(errors).toEqual([]);
   });
 
-  test("a bot that never jumps is game over within 15 s", async ({ page }) => {
+  test("(b) a bot that never jumps is game over within 15 s", async ({ page }) => {
     await startBot(page, false);
     const t0 = Date.now();
     await expect.poll(() => page.getAttribute("#game", "data-state"), { timeout: 15000, intervals: [250] }).toBe("over");
     expect(Date.now() - t0).toBeLessThan(15000);
     expect(await page.getAttribute("#game", "data-jumps")).toBe("0");
+  });
+
+  // (c) Varje level via ?level=N: rätt miljö, rätt fart, inga fel. Skärmdump per miljö.
+  const LEVELS: [number, string][] = [[1, "gras"], [2, "grotta"], [3, "stad"], [4, "rymd"], [5, "gras"], [6, "grotta"], [7, "stad"], [8, "rymd"]];
+  for (const [n, env] of LEVELS) {
+    test(`(c) ?level=${n} starts in ${env} at the right speed and renders without errors`, async ({ page, browser }) => {
+      const errors = trackErrors(page);
+      await page.addInitScript(() => localStorage.setItem("vilgots-kalas-best", "7"));
+      await startBot(page, true, `/?level=${n}`);
+      expect(await page.getAttribute("#game", "data-level")).toBe(String(n));
+      expect(await page.getAttribute("#game", "data-env")).toBe(env);
+      const v = await page.evaluate(() => (window as any).__api.v());
+      expect(v).toBeGreaterThanOrEqual(vAt((n - 1) * 30) - 1);
+      expect(v).toBeLessThan(vAt((n - 1) * 30 + 5));
+      await page.waitForTimeout(2500);
+      if (n <= 4) {
+        await page.locator("#game").screenshot({ path: path.join(QA_DIR, `screenshot-env-${n}-${env}.png`) });
+        // Skärpt skärmdump i telefonupplösning (pixelkvot 3)
+        const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true });
+        await ctx.route(FIREBASE, (r) => r.abort());
+        await ctx.routeWebSocket(FIREBASE, (ws) => ws.close());
+        const p2 = await ctx.newPage();
+        await startBot(p2, true, `/?level=${n}`);
+        await p2.waitForTimeout(3000);
+        await p2.locator("#game").screenshot({ path: path.join(QA_DIR, `screenshot-env-${n}-${env}-dpr3.png`) });
+        await ctx.close();
+      }
+      expect(errors).toEqual([]);
+      // Övningsläget (?level) rör inte webbläsarens rekord
+      expect(await page.evaluate(() => localStorage.getItem("vilgots-kalas-best"))).toBe("7");
+    });
+  }
+
+  test("level up: blink, pling and a fade to the next environment without a pause", async ({ page }) => {
+    await page.addInitScript(() => ((window as any).__sfx = []));
+    const errors = trackErrors(page);
+    await startBot(page, true, "/?level=1.93"); // 27,9 s in i level 1
+    expect(await page.getAttribute("#game", "data-env")).toBe("gras");
+    // Himlens färg mäts inne i sidan 300 ms efter bytet (mitt i den 1 s långa
+    // övergången) och 1,3 s efter – poll från testet kommer för sent
+    const sky = await page.evaluate(
+      () =>
+        new Promise<number[][]>((resolve) => {
+          const el = document.getElementById("game")!;
+          const c = document.getElementById("game-canvas") as HTMLCanvasElement;
+          const px = () => Array.from(c.getContext("2d")!.getImageData(2, c.height / 2, 1, 1).data.slice(0, 3));
+          new MutationObserver((_, mo) => {
+            if (el.dataset.level !== "2") return;
+            mo.disconnect();
+            const out: number[][] = [];
+            setTimeout(() => out.push(px()), 300);
+            setTimeout(() => resolve([...out, px()]), 1300);
+          }).observe(el, { attributes: true, attributeFilter: ["data-level"] });
+        })
+    );
+    expect(await page.getAttribute("#game", "data-env")).toBe("grotta");
+    expect(await page.getAttribute("#game", "data-state")).toBe("run"); // ingen paus
+    expect(await page.evaluate(() => (window as any).__sfx)).toContain("level");
+    const grass = [0x10, 0x16, 0x2c];
+    const cave = [0x08, 0x07, 0x0c];
+    expect(sky[0], "mitt i övergången: varken gräsets eller grottans himmel").not.toEqual(grass);
+    expect(sky[0]).not.toEqual(cave);
+    expect(sky[1], "efter ~1 s: grottans himmel").toEqual(cave);
+    await page.locator("#game").screenshot({ path: path.join(QA_DIR, "screenshot-env-overgang.png") });
+    expect(errors).toEqual([]);
   });
 });
 

@@ -9,6 +9,15 @@ Läsordning för en ny session: README.md → DECISIONS.md (beslutslogg, nyast �
 - I `qa/` spåras bara testsviten `qa/verify.spec.ts`. Rapport, skärmdumpar och Lighthouse-data är gitignorerade och finns bara lokalt. Kör sviten med `npm run build && npx playwright test`.
 - Ingen grafik, inga figurer eller blockmönster från riktiga spel (Minecraft, Roblox m.fl.). Ritas ny pixelgrafik ska den vara egen och generisk, i `src/sprites.ts`.
 
+## Arbetssätt
+
+**Skala verifieringen efter ändringen.** Rör en ändring flera nivåer gäller den högsta.
+
+- **Lighthouse** körs bara när bundle, laddningsordning, fonter eller bilder ändrats. Kör då minst tre gånger (se Kända fällor).
+- **Full testsvit** körs bara när delad logik har rörts: OSA, spelet eller Firebase/topplistan.
+- **Ren layout- eller textändring:** bygg, kör de berörda testerna och ta en skärmdump. Inget mer.
+- **Rapporten** ska säga vilken nivå som valdes och varför.
+
 ## Kända fällor
 
 - **Använd `svh`, inte `dvh`/`vh`, för helskärmssektioner.** `dvh` ändras när Safaris adressfält visas vid uppåtscroll, och då hoppar allt innehåll under sektionen. Chromium/Playwright kan inte återskapa detta, så testa på riktig iPhone.
@@ -35,3 +44,4 @@ Läsordning för en ny session: README.md → DECISIONS.md (beslutslogg, nyast �
 - **Mät tillgänglig bredd på rätt element.** När spelet lades i `.game-wrap` (som har innehållets bredd) mätte det sin egen bredd, och skalan låste sig på minsta möjliga (192 px i stället för 320). Storlekstestet missade det eftersom det bara kontrollerade att skalan var ett heltal. Testa att saken fyller sin plats, inte bara att den har rätt form.
 - **Namn från databasen i pixelfonten:** versalt Å/Ä/Ö ("Åsa" lästes som "Asa"). `pixelSafe()` i src/leaderboard.ts skriver sådana namn med gemener. Använd den för all text i pixelfonten som kommer utifrån.
 - **Realtime Database-regler: `.validate` körs inte vid radering.** Ett skydd mot radering måste ligga i `.write` (`newData.exists()`), annars kan vem som helst tömma en nod som bara har `.validate`-regler.
+- **Första tidssteget från `requestAnimationFrame` kan vara negativt.** Bildrutans tidsstämpel kan ligga före `performance.now()` vid starten. Med levels gick speltiden då baklänges över en levelgräns (`?level=3` blev level 2, och vid t = 0 blev det level 0 och en miljö som inte finns), och loopen kraschade. Begränsa alltid dt till `[0, max]`.

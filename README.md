@@ -50,15 +50,23 @@ Beskärningen står i skriptet. Ändras porträttets beskärning måste solglas�
 
 ## Minispelet (Bonus level)
 
-`src/game.ts`, utan bibliotek, under 6,5 kB (6 473 B minifierat; mätt med esbuild `--charset=utf8`, som bygget levererar). Marginalen är bara 27 B. Spelet räknar i spelpixlar (192×96). Canvasen får bredden 192·k *enhetspixlar*, med k som heltal, och ritar med `ctx.scale(k)`, så varje spelpixel blir exakt k×k skärmpixlar.
+`src/game.ts` (fysik, loop, inmatning) och `src/levels.ts` (miljöer, hinder, paletter), utan bibliotek. Budget 20 kB minifierat; nu 10 401 B (4,9 kB gzip), mätt med esbuild `--charset=utf8`, som bygget levererar. Spelet räknar i spelpixlar (192×96). Canvasen får bredden 192·k *enhetspixlar*, med k som heltal, och ritar med `ctx.scale(k)`, så varje spelpixel blir exakt k×k skärmpixlar.
 
 - **Start:** spelet startar bara på ett riktigt tryck (eller Mellanslag/Enter), aldrig av scroll. I viloläge släpps scrollgester igenom (`touch-action: pan-y`). Under spel äts all touch (`.playing` → `touch-action: none` + `preventDefault`), så ett hopp aldrig scrollar sidan.
 - **Loop:** körs med `requestAnimationFrame` bara under spel. Spelet pausas när det är mindre än 30 % synligt eller fliken döljs, och fortsätter bara på tryck.
 - **Poäng och liv:** poängen är sprungen sträcka. Tre krockar ger game over, med en kort skyddstid efter varje krock.
-- **Svårighet:** farten går från 70 till 212 spelpixlar/s (170 efter ~25 s, taket efter ~35 s). Hindren (`KINDS`) kommer i tre markhöjder: låga buskar och block, mellanblock och en hög, smal pelare. Till det kommer en rak fågel i huvudhöjd och en dykfågel i två varianter. Den tidiga dykaren når huvudhöjd innan den är framme och ska hoppas över. Den sena sveper över huvudet och kräver att man står kvar. Cirka 20 % av de låga hindren kommer i par.
-- **Rättvisa:** `jumpWindow()` räknar ut inom vilket avstånd ett avstamp klarar ett hinder vid aktuell fart. `minGap()` räknar ut det kortaste avstånd mellan två hinder som går att klara, och `nextGap()` slumpar aldrig under det. Testsviten låter en bot som hoppar mitt i fönstret spela 60 s utan krock, och en bot som aldrig hoppar ska dö inom 15 s.
+- **Levels och miljöer:** ny level var 30:e sekund, med "LEVEL N" upptill och "LEVEL UP!" som blinkar till ett kort pling vid bytet.
+  - Miljöerna i ordning: gräs, grotta, stad, rymd. Därefter börjar varv 2 från början, med tätare hinder.
+  - Bytet sker utan paus. Himmel och mark tonar till den nya paletten under 1 s, och bakgrundsdekoren (moln, droppstenar, hus, stjärnor) byts när den har rullat ut till vänster.
+  - Hindren byter utseende per miljö (buske → stalagmit → trafikkon → krater, fågel → fladdermus → drönare → satellit, pelare → stenpelare → lastbil → raketdel) men behåller sina höjdklasser.
+- **Fart:** `vAt(t) = 70 + 2t + 0,022t²` spelpixlar/s, utan tak (150 vid 30 s, 270 vid 60 s, 430 vid 90 s). Över ~1 193 px/s syns de höga hindren för sent för att någon ska hinna hoppa, eftersom de kommer in i högerkanten. Den gränsen nås efter ~185 s, så spelet tar alltid slut, även för en perfekt spelare, efter 3–4 minuter. Hindren blir också tätare med tiden (`density()`), och 25 % tätare per varv.
+- **Hinder:** tre markhöjder (låga 6/8 px, mellan 16, höga 28), en rak flygare i huvudhöjd och en dykare i två varianter. Den tidiga dykaren når huvudhöjd innan den är framme och ska hoppas över. Den sena sveper över huvudet och kräver att man står kvar. Cirka 20 % av de låga hindren kommer i par.
+- **Rättvisa:** `jumpWindow()` räknar ut inom vilket avstånd ett avstamp klarar ett hinder vid aktuell fart. `minGap()` räknar ut det kortaste avstånd mellan två hinder som går att klara, och `nextGap()` slumpar aldrig under det, oavsett täthet. Fysiken delas upp i delsteg på högst 4 px, så att snabba hinder inte kan passera gubben mellan två bildrutor.
+  - Testsviten låter en bot som hoppar mitt i fönstret spela från start: den ska nå rymden, inte krocka före 3 min och dö inom 3–4 min speltid.
+  - En bot som aldrig hoppar ska dö inom 15 s.
+- **Dolt `?level=N`:** börjar direkt på level N med rätt fart. Decimaler går också, till exempel `?level=1.9` för att se ett levelbyte efter 3 s. Det är ett övningsläge, så varken rekordet eller topplistan påverkas.
 - **Rekord:** bästa poäng sparas per webbläsare (inte per gäst) i `localStorage` under `vilgots-kalas-best`, och rensas inte av `?reset=1`.
-- **Testkrokar:** `#game` har `data-state` (idle/run/pause/over), `data-lives`, `data-score` och `data-jumps`. Finns `window.__gameHook` när spelet startar får den läsa höjd, hinder och fart (används av botarna).
+- **Testkrokar:** `#game` har `data-state` (idle/run/pause/over), `data-lives`, `data-score`, `data-jumps`, `data-level` och `data-env`. Finns `window.__gameHook` när spelet startar får den läsa höjd, hinder, fart och speltid (används av botarna).
 
 ## Topplistan (Firebase)
 
@@ -113,7 +121,7 @@ Skriptet avslutar med felkod om någon kontroll ger fel resultat.
 
 ## Ljud
 
-Alla ljud (även minispelets hopp och dödsljud) är syntetiserade 8-bitarsljud (fyrkant- och triangelvågor, brus för grävljudet) i `SYNTHS` i `src/main.ts`. Det finns inga ljudfiler. Ljudet startar först vid ett tryck (krav i iOS), ljudknappen i high score-delen stänger av allt, och valet sparas i `localStorage` (`vilgots-kalas-mute`).
+Alla ljud (även minispelets hopp, levelbyte och dödsljud) är syntetiserade 8-bitarsljud (fyrkant- och triangelvågor, brus för grävljudet) i `SYNTHS` i `src/main.ts`. Det finns inga ljudfiler. Ljudet startar först vid ett tryck (krav i iOS), ljudknappen i high score-delen stänger av allt, och valet sparas i `localStorage` (`vilgots-kalas-mute`).
 
 ## Utan JavaScript och felsökning
 

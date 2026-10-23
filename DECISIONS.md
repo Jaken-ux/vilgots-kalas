@@ -2,6 +2,31 @@
 
 Nyast överst. Projektet är en kopia av Livias kalas. Posterna före 2026-10-23 kommer därifrån och gäller den ärvda koden.
 
+## 2026-10-24 — Levels och miljöer i minispelet (körning A), utan farttak
+Ny level var 30:e sekund (`LEVEL N`, blinkande "LEVEL UP!" och pling). Miljöerna är gräs → grotta → stad → rymd, därefter varv 2 med 25 % tätare hinder. Ingen ny mekanik. Hindren byter utseende men behåller höjdklasserna (låg 6/8, mellan 16, hög 28, flygare i huvudhöjd), så rättvisekalkylen gäller i alla miljöer. Miljöerna ligger i `src/levels.ts`.
+
+**Övergång:** palettfärgerna tonas linjärt under 1 s. Dekoren ligger på fyra platser som rullar runt, och varje plats tar ny miljö först när den rullat ut.
+
+**Varför spelet alltid tar slut:** med fast fysik blir hoppfönstren *bredare* i tid ju högre farten är, så en perfekt spelare skulle aldrig dö. Den ärliga gränsen är sikten. Hindren kommer in 162 spelpixlar bort, och den höga klassen kräver avstamp senast 0,136 s före. Över ~1 193 px/s syns hindret för sent.
+- `vAt(t) = 70 + 2t + 0,022t²` kalibrerades mot den gränsen till ~185 s.
+- Förkastat: medvetet orättvisa avstånd på slutet. Det vore fusk mot spelaren, inte ett tempo spelaren förlorar mot.
+
+**Kalibreringsmiss:** jag räknade inte med att ett nytt hinder hinner flytta sig en bildruta (~18 px) innan det syns. Den verkliga gränsen vid 60 fps är ~1 062 px/s, vilket nås vid ~177 s.
+- Perfekt bot, 3 körningar: första krock vid 178,4 / 179,5 / 197,4 s, game over vid 195,5 / 196,2 / 224,7 s, level 7–8.
+- Kurvan behålls, eftersom game over ligger mitt i 3–4 min. Testet kräver nu ingen krock före 170 s, och ett deterministiskt test låser den verkliga gränsen till 170–185 s.
+
+**Tunnling:** fysiken delas i delsteg på högst 4 px. Över ~600 px/s hann hindren annars passera gubben mellan två bildrutor.
+
+**Fel som fanns sedan spelet byggdes:** första tidssteget från `requestAnimationFrame` kunde vara negativt. Med levels backade speltiden över en levelgräns och loopen kraschade (`ENVS[-1]`). dt begränsas nu till 0–50 ms.
+
+**`?level=N`** (även decimaler) är ett övningsläge: varken rekordet eller topplistan påverkas. Förkastat: att räkna poäng därifrån, eftersom man då kunde hoppa över de långsamma leveln.
+
+**Lastbilen** är 24 px bred (pelaren 6 px). Sikt-gränsen beror bara på höjden, och fönstret räcker från stadens lägsta fart (270 px/s).
+
+**Visuell kontroll** gjordes med ett galleri ritat direkt ur `levels.ts`. Fladdermusen syntes inte (mörkblått på svart), grottans stenar hade låg kontrast och lastbilens hjul såg ut som ben. Alla tre är rättade.
+
+**Storlek och prestanda:** game + levels 10 401 B (budget höjd till 20 kB). Huvudbundlen 166,15 kB (+4,07 kB). Lighthouse mobil 3 körningar: 98, 98, 98. En fjärde botkörning i hela sviten: första krock 181,5 s, game over 186,8 s. Commit: "Add levels and environments".
+
 ## 2026-10-24 — Topplistan flyttad till en utfällbar panel under spelet
 Topplistan ligger nu direkt under spelet i Bonus level (`#board`), inte i outron. Detta ersätter "Laddning" och "Visning" i posten nedan.
 

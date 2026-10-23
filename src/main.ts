@@ -309,7 +309,7 @@ function initAudioUnlock() {
 
 // 8-bitarsljud syntetiseras direkt med Web Audio (fyrkant- och triangelvågor
 // med korta envelopes) – inga ljudfiler att ladda.
-type SoundName = "blip" | "coin" | "dig" | "chest" | "ouch" | "gameover" | "levelup" | "equip" | "jump";
+type SoundName = "blip" | "coin" | "dig" | "chest" | "ouch" | "gameover" | "levelup" | "equip" | "jump" | "level";
 const MASTER_VOLUME = 0.22;
 
 interface Note {
@@ -414,6 +414,8 @@ const SYNTHS: Record<SoundName, (ctx: AudioContext, out: AudioNode, t0: number, 
   },
   // Hopp i minispelet: kort glid uppåt
   jump: (c, o, t, r) => note(c, o, t, r, { f: 300, to: 700, at: 0, dur: 0.12, vol: 0.3 }),
+  // Ny level i minispelet: kort pling, tre toner uppåt
+  level: (c, o, t, r) => arp([784, 1047, 1568], 0.06, 0.08, 0.3).forEach((n) => note(c, o, t, r, n)),
 };
 
 function playSound(name: SoundName, { rate = 1, volume = 1 } = {}) {
