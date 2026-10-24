@@ -54,7 +54,13 @@
           "Alla OSA-nycklar i webbläsaren: " + (allKeys.length ? allKeys.join(", ") : "inga"),
           "Fel (" + errors.length + "):"
         ].concat(errors.length ? errors : ["(inga)"]);
-        pre.textContent = lines.join("\n");
+        // Ljudraden uppdateras live så att den kan läsas av efter ett tryck
+        var render = function () {
+          var audio = window.__audio ? window.__audio() : "(huvudskriptet körde inte)";
+          pre.textContent = ["Ljud: " + audio].concat(lines).join("\n");
+        };
+        render();
+        setInterval(render, 500);
         pre.hidden = false;
       }, 4500);
     })();

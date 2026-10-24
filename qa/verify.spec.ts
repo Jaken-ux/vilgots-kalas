@@ -265,26 +265,68 @@ test.describe("Definition of Done", () => {
   test("audio: no AudioContext at load, running after first tap, resumed after suspend", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
     await ctx.route(/formspree\.io/, (r) => r.fulfill({ status: 200, body: '{"ok":true}' }));
+    await ctx.route(FIREBASE, (r) => r.abort());
+    await ctx.routeWebSocket(FIREBASE, (ws) => ws.close());
     const page = await ctx.newPage();
+    // Chromium skapar kontexten som "running" direkt i ett tryck. iOS gör det
+    // inte: den börjar "suspended" och resume() blir klar först efter en stund.
+    // Klassen härmar iOS. __log: varje skapad kontext, resume() och oscillator,
+    // med vilket tryck (window.event) som pågick och state i det ögonblicket.
     await page.addInitScript(() => {
+      const w = window as any;
       const Orig = window.AudioContext;
-      (window as any).__ctxs = [];
-      window.AudioContext = class extends Orig {
+      w.__ctxs = [];
+      w.__log = [];
+      const ev = () => (window.event as Event | undefined)?.type ?? null;
+      class IOSContext extends Orig {
+        woken = false;
         constructor(...a: any[]) {
           super(...a);
-          (window as any).__ctxs.push(this);
+          w.__ctxs.push(this);
+          w.__log.push({ op: "new", ev: ev(), state: this.state });
         }
-      } as typeof AudioContext;
+        get state() {
+          return this.woken ? super.state : "suspended";
+        }
+        resume() {
+          w.__log.push({ op: "resume", ev: ev(), state: this.state });
+          return new Promise<void>((r) => setTimeout(r, 80))
+            .then(() => super.resume())
+            .then(() => void (this.woken = true));
+        }
+        suspend() {
+          return super.suspend().then(() => void (this.woken = false));
+        }
+      }
+      window.AudioContext = IOSContext as unknown as typeof AudioContext;
+      const osc = BaseAudioContext.prototype.createOscillator;
+      BaseAudioContext.prototype.createOscillator = function () {
+        w.__log.push({ op: "osc", ev: ev(), state: this.state });
+        return osc.call(this);
+      };
     });
     const states = () => page.evaluate(() => (window as any).__ctxs.map((c: AudioContext) => c.state));
+    const log = () => page.evaluate(() => (window as any).__log as { op: string; ev: string | null; state: string }[]);
 
-    await page.goto("/");
+    await page.goto("/?debug=1");
     await page.waitForLoadState("networkidle");
     await page.waitForTimeout(500);
     expect(await states()).toEqual([]); // inte vid sidladdning
 
+    // Första trycket ger ett ljud (equip). Kontexten skapas och resume() anropas
+    // synkront inne i trycket; ingen oscillator skapas förrän den kör.
     await page.locator("#btn-hero").tap();
     await expect.poll(states).toEqual(["running"]);
+    await expect.poll(async () => (await log()).filter((l) => l.op === "osc").length).toBeGreaterThan(0);
+    const first = await log();
+    expect(first[0]).toMatchObject({ op: "new", ev: expect.stringMatching(/^(touchend|pointerup|click)$/) });
+    expect(first[1]).toMatchObject({ op: "resume", ev: first[0].ev });
+    expect(first.filter((l) => l.op === "osc").every((l) => l.state === "running")).toBe(true);
+
+    // ?debug=1 visar ljudläget live
+    await expect(page.locator("#debug")).toContainText("AudioContext.state=running", { timeout: 6000 });
+    await expect(page.locator("#debug")).toContainText("mute=false");
+    await expect(page.locator("#debug")).toContainText("upplåsning: ja");
 
     // iOS pausar kontexten vid appbyte – nästa tryck ska väcka den
     await page.evaluate(() => (window as any).__ctxs[0].suspend());

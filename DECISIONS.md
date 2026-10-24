@@ -2,6 +2,13 @@
 
 Nyast överst. Projektet är en kopia av Livias kalas. Posterna före 2026-10-23 kommer därifrån och gäller den ärvda koden.
 
+## 2026-10-24 — iOS-ljud: inga oscillatorer innan kontexten kör
+Ljudet var tyst på iPhone men inte i Livias kalas. Granskat i ordning: kontexten skapas redan först i ett tryck med `resume()` i samma tryck, och den tysta buffern fanns redan. Mute läses som `=== "true"` och knappen läser samma variabel. Enda skillnaden mot Livias: där spelas första ljudet först när filerna laddats, och kontexten kör då. Här skapades oscillatorerna direkt i trycket, när iOS-kontexten ännu var `suspended` och `currentTime` stod på 0.
+- Nu: `playSound()` spelar direkt bara om state är `running`, annars när `resume()` är klar (inom 0,5 s, samma gräns som Livias).
+- `?debug=1` visar state, mute och upplåsning live, så att orsaken kan läsas av på telefonen. Ändringen är inte bekräftad på riktig iPhone.
+- Inte gjort: `navigator.audioSession.type = "playback"`, som får Web Audio att spela trots ljudlös-läget. Det ändrar beteendet och är Jacobs beslut. Livias kalas har samma ljudsession och fungerar.
+- Testet härmar iOS (kontexten börjar `suspended`, `resume()` dröjer). Negativ kontroll: utan spärren föll testet.
+
 ## 2026-10-24 — Pizzan först i Vad händer
 Pizzan ligger nu först, före Gaming, med rubriken "Det bjuds på pizza!" (första posten i `content.party.program`). Detta ersätter ordningen i posten "Ny tid 17:00–19:30, pizza i programmet", där pizzan låg efter Gaming. Tugg-interaktionen och texterna är oförändrade. Verifiering, lätt nivå: bygg, berörda tester 6/6 och en skärmdump. Commit: "Pizza first".
 

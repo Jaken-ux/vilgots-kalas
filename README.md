@@ -175,7 +175,7 @@ Alla ljud (även minispelets hopp, levelbyte och dödsljud) är syntetiserade 8-
 
 - **Utan JS** syns porträtt, all text, pixelgrafiken och adressen. PRESS START är en vanlig länk. Animationer, tryckinteraktioner, ljud, nedräkningen och namnet från `?g` kräver JS.
 - **Inanimering:** ett litet skript i `<head>` sätter klassen `js` på `<html>`, och bara då döljer CSS de element som tonas in. Blir huvudskriptet inte klart inom 4 s, eller fallerar ett steg i `init()`, tas klassen bort och allt visas utan animation.
-- **Felrapport:** lägg till `?debug=1` i URL:en. Efter cirka 4,5 s visas en ruta längst ner med webbläsarens user agent, porträttets status, vilken OSA-nyckel som lästes och alla JS-fel.
+- **Felrapport:** lägg till `?debug=1` i URL:en. Efter cirka 4,5 s visas en ruta längst ner med webbläsarens user agent, porträttets status, vilken OSA-nyckel som lästes och alla JS-fel. Översta raden visar ljudläget live (uppdateras två gånger per sekund): `AudioContext.state`, mute-värdet (även det sparade i `localStorage`) och om första upplåsningen gav en kontext som kör. Läs av den efter ett tryck på sidan.
 
 ## Personlig länk
 

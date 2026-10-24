@@ -275,6 +275,10 @@ function initSignpost() {
 let audioCtx: AudioContext | null = null;
 let isMuted = localStorage.getItem(MUTE_KEY) === "true";
 
+// Visas med ?debug=1: har första upplåsningen (tyst buffer i ett tryck) gett
+// en kontext som kör?
+let unlockState = "inget tryck än";
+
 function getAudioCtx(): AudioContext {
   if (!audioCtx) {
     audioCtx = new AudioContext();
@@ -283,6 +287,9 @@ function getAudioCtx(): AudioContext {
   if (audioCtx.state !== "running") audioCtx.resume().catch(() => {});
   return audioCtx;
 }
+
+(window as unknown as { __audio?: () => string }).__audio = () =>
+  `AudioContext.state=${audioCtx?.state ?? "(ej skapad)"} · mute=${isMuted} (sparat: ${localStorage.getItem(MUTE_KEY)}) · upplåsning: ${unlockState}`;
 
 // iOS Safari: AudioContext måste skapas/resume():as inom en user gesture,
 // annars förblir den suspended. Lås upp på varje tryck (billigt när den redan
@@ -298,8 +305,16 @@ function initAudioUnlock() {
       src.buffer = ctx.createBuffer(1, 1, 22050);
       src.connect(ctx.destination);
       src.start(0);
-    } catch {
-      // Ignore audio errors
+      if (unlockState !== "ja") {
+        const t = performance.now();
+        unlockState = "väntar på running";
+        ctx.resume().then(
+          () => (unlockState = ctx.state === "running" ? `ja (${Math.round(performance.now() - t)} ms)` : `nej (state=${ctx.state})`),
+          (e) => (unlockState = `nej (${e})`)
+        );
+      }
+    } catch (e) {
+      unlockState = `nej (${e})`;
     }
   };
   for (const type of ["touchend", "pointerup", "click", "keydown"]) {
@@ -434,10 +449,20 @@ function playSound(name: SoundName, { rate = 1, volume = 1 } = {}) {
   (window as unknown as { __sfx?: string[] }).__sfx?.push(name);
   try {
     const ctx = getAudioCtx();
-    const out = ctx.createGain();
-    out.gain.value = volume * MASTER_VOLUME;
-    out.connect(ctx.destination);
-    SYNTHS[name](ctx, out, ctx.currentTime + 0.01, rate);
+    const synth = () => {
+      const out = ctx.createGain();
+      out.gain.value = volume * MASTER_VOLUME;
+      out.connect(ctx.destination);
+      SYNTHS[name](ctx, out, ctx.currentTime + 0.01, rate);
+    };
+    if (ctx.state === "running") return synth();
+    // Första trycket: resume() är asynkron och currentTime står still tills
+    // kontexten kör. Skapa inga oscillatorer förrän dess – spela när den kör,
+    // om det fortfarande känns som svar på trycket (< 0,5 s).
+    const t = performance.now();
+    ctx.resume().then(() => {
+      if (ctx.state === "running" && performance.now() - t < 500) synth();
+    }, () => {});
   } catch {
     // Ignore audio errors
   }
