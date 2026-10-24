@@ -756,6 +756,18 @@ h1, h2, .act-title {
   visibility: visible;
 }
 
+/* Pizzan står helt still: egen kolumn med fast bredd (inga auto-marginaler i
+   flexraden), och etiketten håller alltid en rad, så att radhöjden inte ändras */
+.pizza-btn {
+  flex: 0 0 64px;
+  margin: 0;
+}
+.pizza-text .tap-label {
+  white-space: nowrap;
+  min-height: 1.7em;
+  line-height: 1.7;
+}
+
 /* Pizzans text ("Ta en tugga!" …): bara med JS, utan JS går det inte att tugga */
 .tap-label {
   font-size: 0.85rem;

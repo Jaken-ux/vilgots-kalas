@@ -309,7 +309,7 @@ function initAudioUnlock() {
 
 // 8-bitarsljud syntetiseras direkt med Web Audio (fyrkant- och triangelvågor
 // med korta envelopes) – inga ljudfiler att ladda.
-type SoundName = "blip" | "coin" | "dig" | "chest" | "ouch" | "gameover" | "levelup" | "equip" | "jump" | "double" | "level" | "crunch";
+type SoundName = "blip" | "coin" | "dig" | "chest" | "ouch" | "gameover" | "levelup" | "equip" | "jump" | "double" | "level" | "crunch" | "life";
 const MASTER_VOLUME = 0.22;
 
 interface Note {
@@ -416,6 +416,8 @@ const SYNTHS: Record<SoundName, (ctx: AudioContext, out: AudioNode, t0: number, 
   jump: (c, o, t, r) => note(c, o, t, r, { f: 300, to: 700, at: 0, dur: 0.12, vol: 0.3 }),
   // Dubbelhopp: samma glid, en oktav högre och kortare
   double: (c, o, t, r) => note(c, o, t, r, { f: 600, to: 1400, at: 0, dur: 0.09, vol: 0.25 }),
+  // Extraliv i minispelet: snabbt pling uppåt
+  life: (c, o, t, r) => arp([1047, 1319, 1568, 2093], 0.05, 0.07, 0.3).forEach((n) => note(c, o, t, r, n)),
   // Tugga på pizzan: två krispiga brusknaster och en kort, dov tugga
   crunch: (c, o, t, r) => {
     crackle(c, o, t, 0, 0.04, 2600 * r);

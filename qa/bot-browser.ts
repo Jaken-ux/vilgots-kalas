@@ -1,7 +1,8 @@
 // Boten i webbläsaren. Testsviten paketerar filen med esbuild och lägger den
 // som init-skript på sidan. Den spelar mot spelets motor via window.__gameHook
 // och trycker med riktiga pointerdown på spelytan. Läget sätts före sidladdning:
-// window.__botDelay = 0 (perfekt), 0.25 (mänsklig) eller null (passiv).
+// window.__botKind = "perfect" (standard), "human" eller "passive". Boten går
+// på hjärtan.
 //
 // Frysning för skärmdumpar: window.__freeze = true stoppar alla nya
 // requestAnimationFrame, så att canvasen står kvar på senast ritade bildruta.
@@ -29,7 +30,7 @@ w.__gameHook = (api: { engine(): Engine }) => {
       eng = e;
       lives = e.lives;
       const tap = () => void el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
-      bot = makeBot(e, w.__botDelay === undefined ? 0 : w.__botDelay, true, tap);
+      bot = makeBot(e, w.__botKind ?? "perfect", { hunt: true, press: tap });
     }
     if (w.__freeze) return void raf(tick);
     if (el.dataset.state === "run") bot!();

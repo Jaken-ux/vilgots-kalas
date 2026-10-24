@@ -22,7 +22,7 @@ export const DOUBLE = Math.sqrt(0.6);
 // efter tabellen fortsätter den med samma ökning per level, utan tak.
 const V1 = 70;
 const DROP = 0.85;
-const ENDS = [141, 243, 400, 487, 593, 723, 880, 1350];
+const ENDS = [130, 210, 310, 470, 593, 723, 880, 1350];
 const GROW = 1.2;
 export const levelEnd = (n: number): number => ENDS[n - 1] ?? ENDS[ENDS.length - 1] * GROW ** (n - ENDS.length);
 export const levelStart = (n: number) => (n > 1 ? DROP * levelEnd(n - 1) : V1);
@@ -203,6 +203,8 @@ export interface Plan {
   // Hoppet klarar nästa hinder men inte de som följer tätt efter: de kräver
   // ett dubbelhopp i luften (rescue)
   more?: boolean;
+  h?: Hazard; // hindret hoppet gäller
+  dbl?: number; // andra trycket (hjärtat)
 }
 const PSTEP = 1 / 120;
 export const MARGIN = 2 / 60; // två bildrutor: ett tryck kommer alltid i en bildruta
@@ -256,7 +258,7 @@ export function plan(F: number, hz: Hazard[], need = MARGIN): Plan | null {
     if (r) {
       const at = Math.max(F, (r[0] + r[1]) / 2);
       const e = physAt(at);
-      return { at, land: landAt({ t: at, g: e.g, v0: e.v0 }), more: only !== hz };
+      return { at, land: landAt({ t: at, g: e.g, v0: e.v0 }), more: only !== hz, h: next };
     }
   }
   return null;
@@ -279,8 +281,50 @@ export function rescue(fl: Flight, now: number, hz: Hazard[]): number | null {
   return r ? Math.max(now, (r[0] + r[1]) / 2) : null;
 }
 
+// ----- Hjärtat -----
+// Ett per level, ungefär mitt i: så högt att bara ett dubbelhopp når det
+// (ett vanligt hopp når 47,5 px, i rymden 50 px). Plockat = +1 liv (max 3).
+export const HEART_LO = 53; // underkant över marken
+const HEART_W = 9;
+const HEART_H = 8;
+export interface Heart {
+  t0: number; // när det kommer in i högerkanten
+  s0: number;
+  seen: number;
+  level: number;
+  x: number;
+  got?: boolean;
+  plans?: Plan[];
+}
+export const heartX = (h: Heart, t: number) => W - (distAt(t) - h.s0);
+// Gubbens ruta mot hjärtats, utan förlåtelse
+export const catches = (h: Heart, y: number, t: number) => {
+  const x = heartX(h, t);
+  return RX + 8 > x && RX < x + HEART_W && y + 10 > HEART_LO && y < HEART_LO + HEART_H;
+};
+// Alla hopp + dubbelhopp (var 1/60 s) som tar hjärtat: [avstamp, andra tryck, landning]
+export function catchPlans(h: Heart): Plan[] {
+  if (h.plans) return h.plans;
+  let a = h.t0;
+  while (heartX(h, a) > RX + 8) a += 1 / 240;
+  const out: Plan[] = [];
+  for (let t = a - 1; t < a + 0.3; t += 1 / 60) {
+    const e = physAt(t);
+    for (let d = t + 2 / 60; d < t + (2 * e.v0) / e.g - 1 / 60; d += 1 / 60) {
+      const fl = { t, g: e.g, v0: e.v0, d };
+      for (let u = Math.max(a, d); u < a + 0.3; u += 1 / 240) {
+        if (catches(h, fy(fl, u), u)) {
+          out.push({ at: t, dbl: d, land: landAt(fl) });
+          break;
+        }
+      }
+    }
+  }
+  return (h.plans = out);
+}
+
 // ----- Motorn -----
-export type EngineEvent = "jump" | "double" | "ouch" | "over" | "level" | "coin";
+export type EngineEvent = "jump" | "double" | "ouch" | "over" | "level" | "coin" | "life";
 // Rymdskepp: flyger in, siktar och skjuter (skottet är hindret)
 const SHIP_LEAD = 0.55;
 const LIGHT_LEAD = 1.4; // trafikljuset: syns 1,4 s före bilraden, rött 1 s före
@@ -342,6 +386,10 @@ export function createEngine(opts: { rand?: () => number; start?: number; emit?:
     obs: [] as Hazard[],
     lights: [] as Light[],
     puffs: [] as Puff[],
+    heart: null as Heart | null,
+    hearts: 0, // plockade hjärtan
+    lifeAt: -9, // när senaste extralivet kom ("+1 LIV")
+    heartWin: [0, 0] as [number, number], // tiden som hålls fri från hinder runt hjärtat
     press,
     step,
   };
@@ -357,6 +405,7 @@ export function createEngine(opts: { rand?: () => number; start?: number; emit?:
   let lastW = 0;
   const queue: Spec[] = [];
   let sinceHigh = 0;
+  let heartLevel = 0; // level som senast fick ett hjärta
   const s0 = distAt(startClock);
 
   const known = () => e.obs.filter((o) => samples(o).end >= prevF);
@@ -427,6 +476,9 @@ export function createEngine(opts: { rand?: () => number; start?: number; emit?:
   function schedule() {
     const base = lastT0 + (lastW + 6) / vAt(lastT0);
     const env = envAt(base + 0.3);
+    const L = levelAt(base);
+    const mid = (L - 1) * LEVEL_SECONDS;
+    if (heartLevel !== L && !queue.length && base > mid + 13 && base < mid + 25 && placeHeart(base, L)) return;
     // Miljön bytte mitt i en grupp: börja om med den nya miljöns hinder
     if (queue.length && !env.kinds[queue[0].n]) queue.length = 0;
     if (!queue.length) pick(env, base);
@@ -524,6 +576,30 @@ export function createEngine(opts: { rand?: () => number; start?: number; emit?:
     lastW = o.k.w;
   }
 
+  // Hjärtat läggs bara där hela fönstret för att ta det – tidigaste avstamp
+  // (0,35 s extra för ett panikhopp) till senaste landning – är fritt från
+  // hinder. Hinder efter hjärtat placeras efter fönstret (ghostF).
+  function placeHeart(base: number, L: number): boolean {
+    for (let t0 = Math.max(base, e.clock + 0.1); t0 < base + 3; t0 += 0.05) {
+      const h: Heart = { t0, s0: distAt(t0), seen: t0, level: L, x: W + 99 };
+      const ps = catchPlans(h);
+      if (!ps.length) return false;
+      const a = Math.min(...ps.map((p) => p.at)) - 0.35;
+      const b = Math.max(...ps.map((p) => p.land)) + 0.1;
+      if (a < ghostF || levelAt(b) !== L) continue;
+      if (e.obs.some((o) => samples(o).end >= a && samples(o).start <= b)) continue;
+      e.heart = h;
+      e.heartWin = [a, b];
+      heartLevel = L;
+      prevF = ghostF = b;
+      ghostAt = Infinity;
+      lastT0 = t0;
+      lastW = HEART_W;
+      return true;
+    }
+    return false;
+  }
+
   // Hinder man ska stå kvar under: spöket måste stå på marken medan det passerar
   function standFits(o: Hazard): number | null {
     const s = samples(o);
@@ -605,6 +681,20 @@ export function createEngine(opts: { rand?: () => number; start?: number; emit?:
       if (o.b < Infinity && o.braked === undefined && distAt(t) - o.s0 >= o.b) o.braked = t;
     }
     e.obs = e.obs.filter((o) => o.x > -o.k.w - 24);
+    const h = e.heart;
+    if (h) {
+      h.x = heartX(h, t);
+      if (!h.got && catches(h, e.y, t)) {
+        h.got = true;
+        e.hearts++;
+        if (e.lives < LIVES) {
+          e.lives++;
+          e.lifeAt = t;
+        }
+        emit("life");
+      }
+      if (h.x < -HEART_W || e.level !== h.level) e.heart = null;
+    }
     e.puffs = e.puffs.filter((p) => t - p.t < 0.4);
     e.lights = e.lights.filter((l) => t < l.off);
     while (t >= lastT0 - 0.05) schedule();

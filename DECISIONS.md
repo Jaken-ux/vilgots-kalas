@@ -2,6 +2,53 @@
 
 Nyast överst. Projektet är en kopia av Livias kalas. Posterna före 2026-10-23 kommer därifrån och gäller den ärvda koden.
 
+## 2026-10-24 — Pizzan står still, mänskligare bot och ny kurva, hjärta per level
+**Pizzan hoppade i sidled.** `.tap-btn` har `margin: 0 auto`, och auto-marginaler i en flexrad delar upp det lediga utrymmet, så pizzan flyttade sig när etiketten bytte längd.
+- Pizzan står nu i en egen kolumn med fast bredd (64 px, `margin: 0`), och etiketten håller alltid en rad med fast höjd.
+- Ett test jämför pizzans `boundingBox` i alla fyra lägen. Med den gamla CSS:en föll testet (negativ kontroll).
+- Förkastat: fast bredd på etiketten med centrerad text. Den bredden beror på fonten, och kolumnen gör pizzan oberoende av texten.
+
+**Den mänskliga boten var för idealisk.** Fast 250 ms reaktion, i övrigt felfri: den nådde rymden 10/10, medan Jacob oftast dog i grottan. Ny bot:
+- Reaktionstid 300 ms ± 120 ms, slumpad per hinder, inbromsning och hjärta.
+- 10 % panikhopp 0,1–0,3 s för tidigt. Boten försöker då rädda sig med ett dubbelhopp.
+- Botens slump har ett eget frö, så att banan blir densamma med och utan hjärtjakt.
+- Med körning B:s kurva nådde den nya boten rymden i bara 8 av 30 körningar (27 %), utan hjärtjakt.
+
+**Ny kurva (sågtanden behållen).** Relativa enheter, start = 50:
+
+| Level | 1 | 2 | 3 | 4 | 5–8 |
+|---|---|---|---|---|---|
+| Körning B | 50→101 | 86→174 | 148→286 | 243→348 | oförändrade |
+| Nu | 50→93 | 79→150 | 128→221 | 188→336 | 285→424, 360→516, 439→629, 534→964 |
+
+- En mellanvariant (L2 slut 161, L3 slut 243) räckte också för kraven: rymden i 26 av 30 körningar.
+- Den mildare valdes därför att Jacob dör i grottan, medan boten klarar grottan i 30 av 30 körningar. Boten tajmar fortfarande sina dubbelhopp exakt, och grottan har många täta par.
+
+**Statistik, 90 frön per variant (Node):**
+
+| Bot | Game over | Når staden | Når rymden | Övrigt |
+|---|---|---|---|---|
+| Mänsklig | 89–121 s | 90/90 | 89/90 | L5 2/90 |
+| Mänsklig med hjärtjakt | 87–122 s | 90/90 | 89/90 | L5 2/90; 258 hjärtan på 271 hjärthopp, 0 krockar under hjärthopp |
+| Perfekt, med och utan hjärtjakt | 229–246 s | 90/90 | 90/90 | – |
+
+- Hjärtan ändrar knappt den mänskliga botens resultat. Den dör av fartväggen i rymden (L4), där varje hinder över dess gräns kostar ett liv, och då hinner ett extraliv per level inte väga upp.
+- Kravet på den perfekta botens död höjt från 4:30 till 5 min. Det behövdes inte för den nya kurvan, men det är Jacobs nya krav.
+
+**Hjärta per level:** placeras 13–25 s in i varje level, med underkanten 53 px över marken.
+- Ett vanligt hopp når 47,5 px (50 i rymden), ett hopp + dubbelhopp 70 (74 i rymden).
+- Motorn räknar fram alla hopp + dubbelhopp som tar hjärtat (`catchPlans`). Från tidigaste avstamp minus 0,35 s (panikhopp) till senaste landning plus 0,1 s får inga hinder överlappa. Spöket står still under fönstret, så att följande hinder läggs efter det.
+- Test: 100 mänskliga körningar med hjärtjakt gav 285 hjärtan på 301 hjärthopp och 0 krockar under hjärthopp. Negativ kontroll: utan garantin blev det 15 krockar.
+- Förkastat: att låta hjärtat komma var som helst och lita på planeringen. Det beställda kravet var "aldrig tur".
+
+JS-budgeten för spelet höjd till 24 kB. Spelet är nu 20 939 B, och huvudbundlen 179,42 kB.
+
+**Efter granskning av skärmdumparna:**
+- Hjärtat blinkade och var släckt i skärmdumpen, så blinkandet togs bort.
+- "+1 LIV" följde gubbens höjd och hamnade utanför bilden. Texten står nu fast mitt i bilden.
+
+**Verifiering, full nivå:** hela sviten 76/76 gröna (13,3 min). Perfekt bot i webbläsaren med riktiga tryck: game over 237,7 s, level 8. Lighthouse mobil: 98, 98, 98. Commit: "Fix pizza layout, recalibrate difficulty, add hearts".
+
 ## 2026-10-24 — Ny tid 17:00–19:30, pizza i programmet
 Tiden ändrad i `content.ts` och syns på det enda stället där den används (`#when-time`). Nedräkningen räknar dagar från datumet och påverkas inte. OSA-texten nämner ingen tid.
 

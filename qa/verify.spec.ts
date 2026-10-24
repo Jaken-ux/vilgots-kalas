@@ -2,7 +2,7 @@ import { test, expect, devices } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { vAt, levelStart, density, hazard, plan, samples, fy, xAt, LEVEL_SECONDS, W } from "../src/engine";
+import { vAt, levelStart, density, hazard, plan, samples, fy, xAt, LEVEL_SECONDS, W, HEART_LO } from "../src/engine";
 import { simulate, type RunResult } from "./bots";
 import { buildSync } from "esbuild";
 import { ENVS } from "../src/levels";
@@ -502,12 +502,20 @@ test.describe("Tap interactions", () => {
       }));
     expect(await state()).toEqual({ masked: true, holes: 0, outside: 0 });
 
+    // Pizzan står helt still i alla fyra lägen (mätt efter studsen, 0,16 s)
+    const box = async () => {
+      await page.waitForTimeout(300);
+      return page.locator("#btn-pizza svg").boundingBox();
+    };
+    const boxes = [await box()];
     const holes: number[] = [];
     for (const text of ["Mums!", "En till?", "Bara kanten kvar…"]) {
       await btn.tap();
       await expect(label).toHaveText(text);
       holes.push((await state()).holes);
+      boxes.push(await box());
     }
+    for (const b of boxes) expect(b, "pizzans boundingBox").toEqual(boxes[0]);
     expect(holes[0]).toBeGreaterThan(0);
     expect(holes[1]).toBeGreaterThan(holes[0]);
     expect(holes[2]).toBeGreaterThan(holes[1]);
@@ -1194,49 +1202,77 @@ test.describe("Bonus level: svårighet, levels och rättvisa", () => {
         .join(" ")} | dubbelhopp ${rs.map((r) => r.doubles).join(" ")}`
     );
 
-  test("perfect bot (0 ms): always reaches space, never crashes before the sight limit, game over within 3:30–4:30", () => {
-    const rs = SEEDS.map((s) => simulate(s, 0));
-    report("perfekt", rs);
-    for (const r of rs) {
-      expect(r.level, "nådde rymden").toBeGreaterThanOrEqual(4);
-      expect(r.crashes[0], "ingen krock före sikt-gränsen (~3:40)").toBeGreaterThan(210);
-      expect(r.end).toBeGreaterThan(210);
-      expect(r.end).toBeLessThan(270);
-      expect(r.doubles, "använder dubbelhopp").toBeGreaterThan(0);
-    }
-    // Alla nya hinder (och täta höga par, bromsande bilar) förekom
-    const kinds = rs.reduce<Record<string, number>>((a, r) => {
-      for (const [k, v] of Object.entries(r.kinds)) a[k] = (a[k] ?? 0) + v;
-      return a;
-    }, {});
-    console.log("hinder i perfekta körningar:", JSON.stringify(kinds));
-    const brakes = Object.keys(kinds).filter((k) => k.endsWith("+broms"));
-    expect(brakes.length).toBeGreaterThan(0);
-    for (const k of ["drop", "hang", "hole", "car", "van", "meteor", "meteorBig", "shotLow", "shotHigh", "wall+tvilling"]) {
-      expect(kinds[k] ?? 0, k).toBeGreaterThan(0);
+  test("perfect bot: always reaches space, never crashes before the sight limit, game over within 5 min – with and without hearts", () => {
+    for (const hunt of [false, true]) {
+      const rs = SEEDS.map((s) => simulate(s, "perfect", { hunt }));
+      report(hunt ? "perfekt med hjärtjakt" : "perfekt", rs);
+      for (const r of rs) {
+        expect(r.level, "nådde rymden").toBeGreaterThanOrEqual(4);
+        expect(r.crashes[0], "ingen krock före sikt-gränsen (~3:40)").toBeGreaterThan(210);
+        expect(r.end).toBeLessThan(300);
+        expect(r.doubles, "använder dubbelhopp").toBeGreaterThan(0);
+        if (hunt) expect(r.hearts, "tar hjärtan").toBeGreaterThan(0);
+      }
+      if (hunt) continue;
+      // Alla nya hinder (och täta höga par, bromsande bilar) förekom
+      const kinds = rs.reduce<Record<string, number>>((a, r) => {
+        for (const [k, v] of Object.entries(r.kinds)) a[k] = (a[k] ?? 0) + v;
+        return a;
+      }, {});
+      console.log("hinder i perfekta körningar:", JSON.stringify(kinds));
+      expect(Object.keys(kinds).filter((k) => k.endsWith("+broms")).length).toBeGreaterThan(0);
+      for (const k of ["drop", "hang", "hole", "car", "van", "meteor", "meteorBig", "shotLow", "shotHigh", "wall+tvilling"]) {
+        expect(kinds[k] ?? 0, k).toBeGreaterThan(0);
+      }
     }
   });
 
-  test("human bot (250 ms): reaches the city in ≥ 8/10 and space in ≥ 3/10, game over within 3 min", () => {
-    const rs = SEEDS.map((s) => simulate(s, 0.25));
-    report("mänsklig", rs);
-    expect(rs.filter((r) => r.level >= 3).length).toBeGreaterThanOrEqual(8);
-    expect(rs.filter((r) => r.level >= 4).length).toBeGreaterThanOrEqual(3);
-    for (const r of rs) expect(r.end).toBeLessThan(180);
+  // Mänsklig: reaktionstid 300 ± 120 ms, 10 % panikhopp (qa/bots.ts)
+  test("human bot: reaches the city in ≥ 8/10 and space in ≥ 3/10, game over within 3 min – with and without hearts", () => {
+    for (const hunt of [false, true]) {
+      const rs = SEEDS.map((s) => simulate(s, "human", { hunt }));
+      report(hunt ? "mänsklig med hjärtjakt" : "mänsklig", rs);
+      expect(rs.filter((r) => r.level >= 3).length).toBeGreaterThanOrEqual(8);
+      expect(rs.filter((r) => r.level >= 4).length).toBeGreaterThanOrEqual(3);
+      for (const r of rs) expect(r.end).toBeLessThan(180);
+    }
+  });
+
+  // Hjärtat ligger högre än ett vanligt hopp når men lägre än ett dubbelhopp, i
+  // alla miljöer; och det läggs bara där landningen efter dubbelhoppet är fri
+  test("hearts: need a double jump; a human bot that always goes for them never lands on an obstacle (100 runs)", () => {
+    for (const env of ENVS) {
+      const apex = (env.v0 * env.v0) / (2 * env.g);
+      expect(apex + 10, `${env.name}: ett vanligt hopp når inte`).toBeLessThan(HEART_LO);
+      expect(apex * 1.6 + 10, `${env.name}: ett dubbelhopp når`).toBeGreaterThan(HEART_LO + 4);
+    }
+    let jumps = 0;
+    let caught = 0;
+    let crashes = 0;
+    for (let s = 1; s <= 100; s++) {
+      const r = simulate(s, "human", { hunt: true });
+      jumps += r.heartJumps;
+      caught += r.hearts;
+      crashes += r.heartCrashes;
+    }
+    console.log(`hjärtjakt, 100 mänskliga körningar: ${caught} hjärtan på ${jumps} hjärthopp, ${crashes} krockar under hjärthopp`);
+    expect(jumps).toBeGreaterThan(200);
+    expect(caught).toBeGreaterThan(jumps * 0.8);
+    expect(crashes).toBe(0);
   });
 
   test("passive bot: game over within 15 s; without double jump even a perfect bot dies early", () => {
-    for (const s of SEEDS) expect(simulate(s, null).end).toBeLessThan(15);
+    for (const s of SEEDS) expect(simulate(s, "passive").end).toBeLessThan(15);
     // Dubbelhoppet behövs: utan det dör en perfekt bot vid de täta höga paren
-    const rs = SEEDS.map((s) => simulate(s, 0, 400, 0, false));
+    const rs = SEEDS.map((s) => simulate(s, "perfect", { doubles: false }));
     report("perfekt utan dubbelhopp", rs);
     for (const r of rs) expect(r.end).toBeLessThan(120);
   });
 
   // Webbläsarboten: samma bot, paketerad, trycker med riktiga pointerdown
   const BOT = buildSync({ entryPoints: [path.join(QA_DIR, "bot-browser.ts")], bundle: true, write: false, format: "iife" }).outputFiles[0].text;
-  const startBot = async (page: Page, delay: number | null, url = "/") => {
-    await page.addInitScript((d) => ((window as any).__botDelay = d), delay);
+  const startBot = async (page: Page, kind: "perfect" | "human" | "passive", url = "/") => {
+    await page.addInitScript((k) => ((window as any).__botKind = k), kind);
     await page.addInitScript({ content: BOT });
     await page.goto(url);
     await page.waitForLoadState("networkidle");
@@ -1251,10 +1287,10 @@ test.describe("Bonus level: svårighet, levels och rättvisa", () => {
     expect(await page.getAttribute("#game", "data-state")).toBe("run");
   };
 
-  test("(a) in the browser: the perfect bot reaches space and is game over within 3:30–4:30", async ({ page }) => {
+  test("(a) in the browser: the perfect bot reaches space and is game over within 5 min", async ({ page }) => {
     test.setTimeout(330000);
     const errors = trackErrors(page);
-    await startBot(page, 0);
+    await startBot(page, "perfect");
     await expect
       .poll(() => page.getAttribute("#game", "data-state"), { timeout: 300000, intervals: [2000] })
       .toBe("over");
@@ -1266,14 +1302,13 @@ test.describe("Bonus level: svårighet, levels och rättvisa", () => {
     console.log("hinder:", JSON.stringify(r.kinds));
     expect(r.level, "nådde rymden (level 4)").toBeGreaterThanOrEqual(4);
     expect(r.crash[0], "ingen krock före sikt-gränsen").toBeGreaterThan(210);
-    expect(r.end).toBeGreaterThan(210);
-    expect(r.end).toBeLessThan(270);
+    expect(r.end).toBeLessThan(300);
     expect(Number(await page.getAttribute("#game", "data-doubles"))).toBeGreaterThan(0);
     expect(errors).toEqual([]);
   });
 
   test("(b) a bot that never jumps is game over within 15 s", async ({ page }) => {
-    await startBot(page, null);
+    await startBot(page, "passive");
     const t0 = Date.now();
     await expect.poll(() => page.getAttribute("#game", "data-state"), { timeout: 15000, intervals: [250] }).toBe("over");
     expect(Date.now() - t0).toBeLessThan(15000);
@@ -1283,7 +1318,7 @@ test.describe("Bonus level: svårighet, levels och rättvisa", () => {
   test("double jump: a second tap in the air jumps again with a puff, a third does nothing", async ({ page }) => {
     await page.addInitScript(() => ((window as any).__sfx = []));
     await page.addInitScript({ content: BOT });
-    await page.addInitScript(() => ((window as any).__botDelay = null));
+    await page.addInitScript(() => ((window as any).__botKind = "passive"));
     await page.goto("/");
     await page.waitForLoadState("networkidle");
     await page.evaluate(() => {
@@ -1331,7 +1366,7 @@ test.describe("Bonus level: svårighet, levels och rättvisa", () => {
     test(`(c) ?level=${n} starts in ${env} at the right speed and renders without errors`, async ({ page, browser }) => {
       const errors = trackErrors(page);
       await page.addInitScript(() => localStorage.setItem("vilgots-kalas-best", "7"));
-      await startBot(page, 0, `/?level=${n}`);
+      await startBot(page, "perfect", `/?level=${n}`);
       expect(await page.getAttribute("#game", "data-level")).toBe(String(n));
       expect(await page.getAttribute("#game", "data-env")).toBe(env);
       const v = await page.evaluate(() => (window as any).__api.v());
@@ -1345,7 +1380,7 @@ test.describe("Bonus level: svårighet, levels och rättvisa", () => {
         await ctx.route(FIREBASE, (r) => r.abort());
         await ctx.routeWebSocket(FIREBASE, (ws) => ws.close());
         const p2 = await ctx.newPage();
-        await startBot(p2, 0, `/?level=${n}`);
+        await startBot(p2, "perfect", `/?level=${n}`);
         await p2.waitForTimeout(3000);
         await p2.locator("#game").screenshot({ path: path.join(QA_DIR, `screenshot-env-${n}-${env}-dpr3.png`) });
         await ctx.close();
@@ -1359,7 +1394,7 @@ test.describe("Bonus level: svårighet, levels och rättvisa", () => {
   test("level up: blink, pling and a fade to the next environment without a pause", async ({ page }) => {
     await page.addInitScript(() => ((window as any).__sfx = []));
     const errors = trackErrors(page);
-    await startBot(page, 0, "/?level=1.93"); // 27,9 s in i level 1
+    await startBot(page, "perfect", "/?level=1.93"); // 27,9 s in i level 1
     expect(await page.getAttribute("#game", "data-env")).toBe("gras");
     // Himlens färg mäts inne i sidan 300 ms efter bytet (mitt i den 1 s långa
     // övergången) och 1,3 s efter – poll från testet kommer för sent
@@ -1395,7 +1430,7 @@ test.describe("Bonus level: svårighet, levels och rättvisa", () => {
   // bildrutor) och spelytan fotograferas. Slumpen seedas (Math.random), med ett
   // frö där Node-simuleringen visar att hindren kommer inom levelns 26 första s.
   const SHOTS: [number, string[], [string, string][]][] = [
-    [2, ["drop", "hang", "wall+tvilling"], [["stalaktit-droppar", "drip"], ["stalaktit-faller", "fall"], ["stalaktit-landad", "landed"], ["stalaktit-hanger", "hang"], ["dubbelhopp", "double"]]],
+    [2, ["drop", "hang", "wall+tvilling"], [["hjarta", "heart"], ["hjarta-plus-liv", "life"], ["stalaktit-droppar", "drip"], ["stalaktit-faller", "fall"], ["stalaktit-landad", "landed"], ["stalaktit-hanger", "hang"], ["dubbelhopp", "double"]]],
     [3, ["hole", "+broms"], [["brunn", "hole"], ["trafikljus-bilar", "light"], ["bil-bromsar", "brake"]]],
     [4, ["meteor", "shotLow|shotHigh"], [["meteorit-skugga", "meteor"], ["meteorit-landad", "meteorLanded"], ["rymdskepp-skjuter", "fire"], ["skott", "shot"]]],
   ];
@@ -1405,7 +1440,7 @@ test.describe("Bonus level: svårighet, levels och rättvisa", () => {
       const start = (lvl - 1) * LEVEL_SECONDS;
       const has = (ks: string[], n: string) => n.split("|").some((x) => ks.some((k) => k === x || (x.startsWith("+") && k.endsWith(x))));
       let seed = 1;
-      while (!needs.every((n) => has(Object.keys(simulate(seed, 0, start + 26, start).kinds), n))) seed++;
+      while (!needs.every((n) => has(Object.keys(simulate(seed, "perfect", { limit: start + 26, start }).kinds), n))) seed++;
       const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true });
       await ctx.route(FIREBASE, (r) => r.abort());
       await ctx.routeWebSocket(FIREBASE, (ws) => ws.close());
@@ -1421,7 +1456,9 @@ test.describe("Bonus level: svårighet, levels och rättvisa", () => {
         };
       }, seed);
       const errors = trackErrors(page);
-      await startBot(page, 0, `/?level=${lvl}`);
+      await startBot(page, "perfect", `/?level=${lvl}`);
+      // Två liv, så att ett plockat hjärta ger "+1 LIV" (den perfekta boten krockar aldrig)
+      await page.evaluate(() => ((window as any).__api.engine().lives = 2));
       // Alla lägen bevakas samtidigt; det som inträffar först fotograferas
       const pending = new Map(shots.map(([file, cond]) => [cond, file]));
       let retries = 0;
@@ -1433,6 +1470,8 @@ test.describe("Bonus level: svårighet, levels och rättvisa", () => {
               const timer = setTimeout(() => ((w.__check = null), resolve(null)), 32000);
               const inView = (o: any, a: number, b: number) => o.x > a && o.x < b;
               const is: Record<string, (e: any) => boolean> = {
+                life: (e) => e.clock - e.lifeAt > 0.15 && e.clock - e.lifeAt < 0.4,
+                heart: (e) => !!e.heart && !e.heart.got && e.fl?.d !== undefined && e.heart.x < 50 && e.heart.x > 20,
                 drip: (e) => e.obs.some((o: any) => o.n === "drop" && e.clock < o.on - 0.33 && inView(o, 30, 186)),
                 fall: (e) => e.obs.some((o: any) => o.n === "drop" && e.clock > o.on - 0.2 && e.clock < o.on - 0.05),
                 landed: (e) => e.obs.some((o: any) => o.n === "drop" && e.clock > o.on + 0.02 && e.clock < o.on + 0.2),

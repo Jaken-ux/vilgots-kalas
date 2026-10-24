@@ -6,9 +6,9 @@
 // miljöerna (gräs, grotta, stad, rymd) i levels.ts. Här: ritning, tryck, loop.
 import { PALETTE, SPRITES } from "./sprites";
 import { ENVS, GROUND, type Palette } from "./levels";
-import { createEngine, distAt, envAt, LEVEL_SECONDS, LIVES, RX, W, H, type Engine, type EngineEvent } from "./engine";
+import { createEngine, distAt, envAt, HEART_LO, LEVEL_SECONDS, LIVES, RX, W, H, type Engine, type EngineEvent } from "./engine";
 
-export type GameSound = "jump" | "double" | "ouch" | "gameover" | "coin" | "level";
+export type GameSound = "jump" | "double" | "ouch" | "gameover" | "coin" | "level" | "life";
 type State = "idle" | "run" | "pause" | "over";
 
 const BEST_KEY = "vilgots-kalas-best"; // per webbläsare, inte per gäst
@@ -240,6 +240,10 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, hooks: G
       }
     }
 
+    // Hjärtat (högt: kräver dubbelhopp)
+    const hrt = eng.heart;
+    if (hrt && !hrt.got) ctx.drawImage(img.heart, Math.round(hrt.x), GROUND - HEART_LO - 8);
+
     // Gubben blinkar under skyddstiden; springstegen följer sträckan (fortare i hög fart)
     if (!(eng.inv > 0 && Math.floor(eng.inv * 10) % 2)) {
       const g = eng.y > 0 ? img.jump : state === "run" && Math.floor(dist / 6) % 2 ? img.runA : img.runB;
@@ -254,6 +258,8 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, hooks: G
     for (let i = 0; i < LIVES; i++) ctx.drawImage(i < eng.lives ? img.heart : img.empty, 4 + i * 11, 4);
     text(String(score()).padStart(5, "0"), W - 4, 5, PALETTE.y, "right");
     if (state !== "idle") text(`LEVEL ${eng.level}`, W / 2, 5, PALETTE.c);
+    // "+1 LIV" i 1 s efter ett plockat hjärta (mitt i leveln, aldrig samtidigt som LEVEL UP!)
+    if (t - eng.lifeAt < 1) text("+1 LIV", W / 2, 30, PALETTE.p);
     // "LEVEL UP!" blinkar i 1,5 s vid byte
     if (state === "run" && t - levelUpAt < 1.5 && Math.floor((t - levelUpAt) * 6) % 2 === 0) {
       text("LEVEL UP!", W / 2, 30, PALETTE.y);

@@ -9,7 +9,7 @@ Mobilanpassad, ensidig inbjudningssida till Vilgots 10-årskalas (gamingkalas). 
 | Titelskärm (`#intro`) | Porträtt, titel, PRESS START (länk till När), HUD och mark | Porträttet: solglasögon → krona → av. Hjärtana uppe till vänster: varje tryck tar ett liv ("OUCH!"), vid noll "GAME OVER?", nästa tryck "EXTRA LIFE!". Blocket i marken: sprickor, splitter, ett mynt räknas i myntverket uppe till höger, nytt block efter 3 s |
 | När (`#act-when`) | Datum, tid, nedräkning som mynträkneverk | – |
 | Var (`#act-where`) | Skylt och skattkista | Skylten vecklar ut en skattkarta med adress och kartlänkar. Kistan öppnas med ett regn av pixelmynt |
-| Vad händer (`#act-program`) | Gaming, pizza, snacks, ta med (egen ruta) | Pizzabiten: tryck = tugga ("Ta en tugga!" → "Mums!" → "En till?" → "Bara kanten kvar…"), fjärde trycket ger en ny bit. Tuggorna raderar hela pixlar genom en SVG-mask (`initPizza` i src/main.ts) |
+| Vad händer (`#act-program`) | Gaming, pizza, snacks, ta med (egen ruta) | Pizzabiten (står i en egen kolumn med fast bredd, så att den inte flyttar sig när texten byts): tryck = tugga ("Ta en tugga!" → "Mums!" → "En till?" → "Bara kanten kvar…"), fjärde trycket ger en ny bit. Tuggorna raderar hela pixlar genom en SVG-mask (`initPizza` i src/main.ts) |
 | Bonus level (`#act-bonus`) | Minispel i `<canvas>` (src/game.ts, src/engine.ts) och topplistan under det | Tryck startar, tryck = hopp, ett tryck till i luften = dubbelhopp. Fyra miljöer med egna hinder. Tre liv. Under spelet: utfällbar "HIGH SCORE"-panel med den delade topplistan |
 | OSA (`#act-rsvp`) | Formuläret | Ja ger pixelkonfetti och "LEVEL UP!" |
 | High score (`#act-outro`) | "Vilgot – 10 år" och "Du?" (statisk dekoration, ingen koppling till topplistan) | Ljud av/på |
@@ -55,7 +55,7 @@ Tre filer, utan bibliotek:
 - `src/levels.ts`: miljöer, hinder och fysik per miljö.
 - `src/game.ts`: ritning, tryck och loop.
 
-Budget 20 kB minifierat för alla tre. Nu 19 759 B (≈9 kB gzip), mätt med esbuild `--charset=utf8`, som bygget levererar.
+Budget 24 kB minifierat för alla tre. Nu 20 939 B, mätt med esbuild `--charset=utf8`, som bygget levererar.
 
 Spelet räknar i spelpixlar (192×96). Canvasen får bredden 192·k *enhetspixlar*, med k som heltal, och ritar med `ctx.scale(k)`, så varje spelpixel blir exakt k×k skärmpixlar.
 
@@ -69,6 +69,8 @@ Spelet räknar i spelpixlar (192×96). Canvasen får bredden 192·k *enhetspixla
   - Krockar provas i delsteg på högst 4 px.
 - **Hopp och dubbelhopp:** ett tryck på marken hoppar. Ett andra tryck i luften ger ett nytt hopp med 60 % av ett vanligt hopps höjd och en liten pixelpuff under gubben. Ett tredje tryck gör inget förrän gubben landat. Rymden har lägre gravitation: lika högt hopp, men 0,76 s i luften i stället för 0,58.
 - **Poäng och liv:** poängen är sprungen sträcka. Tre krockar ger game over, med en kort skyddstid efter varje krock.
+- **Hjärta per level:** ungefär mitt i varje level (13–25 s in) kommer ett pixelhjärta högt upp. Ett vanligt hopp når inte, men ett hopp + dubbelhopp gör det. Plockat = +1 liv (max 3), pling och "+1 LIV". Missas det försvinner det, och nästa kommer i nästa level.
+  - Motorn räknar fram alla hopp + dubbelhopp som tar hjärtat. Hjärtat läggs bara där hela tiden från tidigaste avstamp (0,35 s extra för ett panikhopp) till senaste landning är fri från hinder. Den som går på hjärtat kan alltså aldrig landa på ett hinder.
 - **Levels och miljöer:** ny level var 30:e sekund, med "LEVEL N" upptill och "LEVEL UP!" som blinkar till ett kort pling vid bytet.
   - Miljöerna i ordning: gräs, grotta, stad, rymd. Därefter börjar varv 2.
   - Bytet sker utan paus. Himmel och mark tonar under 1 s, och bakgrundsdekoren byts när den har rullat ut.
@@ -76,7 +78,7 @@ Spelet räknar i spelpixlar (192×96). Canvasen får bredden 192·k *enhetspixla
 
   | Level | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
   |---|---|---|---|---|---|---|---|---|
-  | Start → slut | 50→101 | 86→174 | 148→286 | 243→348 | 296→424 | 360→516 | 439→629 | 534→964 |
+  | Start → slut | 50→93 | 79→150 | 128→221 | 188→336 | 285→424 | 360→516 | 439→629 | 534→964 |
 
   Hindertätheten följer baslinjen (`density`).
 - **Spelet tar alltid slut**, även för en perfekt spelare. Hindren kommer in 162 px bort, och den höga klassen kräver avstamp tidigt. Över ~1 060 px/s (i rymden ~900 px/s, med långsammare hopp) syns de för sent.
@@ -104,8 +106,9 @@ Spelet räknar i spelpixlar (192×96). Canvasen får bredden 192·k *enhetspixla
   - Synligheten räknas inte: den är spelets ärliga slut.
   - Planeringen (`plan`, `rescue`) provar hoppbanor mot hindrens träffytor var 1/480 s.
 - **Botar** (`qa/bots.ts`) använder samma planering men olika kunskap. Testsviten kör dem i Node, 10 fasta frön vardera, och den perfekta också i webbläsaren med riktiga tryck.
-  - Perfekt (ser allt från första bildrutan): ska nå rymden, inte krocka före sikt-gränsen och dö inom 3:30–4:30.
-  - Mänsklig (reagerar 250 ms efter att ett hinder eller dess förvarning syns, och märker en inbromsning 250 ms sent): ska nå staden i minst 8/10 och rymden i minst 3/10, och dö inom 3 min.
+  - Perfekt (ser allt från första bildrutan): ska nå rymden, inte krocka före sikt-gränsen och dö inom 5 min, med och utan hjärtjakt.
+  - Mänsklig: reaktionstid 300 ms ± 120 ms (slumpad per hinder, inbromsning och hjärta). 10 % av hoppen är panikhopp 0,1–0,3 s för tidigt, och boten försöker då rädda sig med ett dubbelhopp. Ska nå staden i minst 8/10 och rymden i minst 3/10, och dö inom 3 min, både med och utan hjärtjakt.
+  - Mänsklig som alltid går på hjärtat, 100 körningar: får aldrig krocka under ett hjärthopp.
   - Passiv: ska dö inom 15 s.
   - Perfekt utan dubbelhopp: dör vid de täta paren (bevis för att dubbelhoppet behövs).
 - **Dolt `?level=N`:** börjar direkt på level N med rätt fart. Decimaler går också, till exempel `?level=1.9` för att se ett levelbyte efter 3 s. Det är ett övningsläge, så varken rekordet eller topplistan påverkas.
