@@ -1,7 +1,8 @@
 export const content = {
   child: { name: "Vilgot", age: 10 },
   // Gäster som kan hamna på minispelets topplista (via sin ?g-länk). Ändras
-  // listan: kör `npm run rules` och klistra in nya regler i Firebase (README).
+  // listan: kör `npm run rules` (nya regler + sms-länkarna i README) och
+  // klistra in de nya reglerna i Firebase (README).
   guests: ["Vilgot"],
   party: {
     kind: "Gamingkalas",
@@ -30,6 +31,8 @@ export const content = {
   site: {
     title: "Vilgot fyller 10 – du är bjuden!",
     repoName: "vilgots-kalas",
+    // Publicerad adress: sms-länkarna i README (npm run rules) bygger på den
+    url: "https://jaken-ux.github.io/vilgots-kalas/",
   },
 };
 

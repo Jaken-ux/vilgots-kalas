@@ -2,6 +2,8 @@ node_modules/
 dist/
 qa/*
 !qa/verify.spec.ts
+!qa/bots.ts
+!qa/bot-browser.ts
 test-results/
 CC-PROMPT.md
 assets/sound/

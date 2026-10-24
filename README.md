@@ -10,7 +10,7 @@ Mobilanpassad, ensidig inbjudningssida till Vilgots 10-årskalas (gamingkalas). 
 | När (`#act-when`) | Datum, tid, nedräkning som mynträkneverk | – |
 | Var (`#act-where`) | Skylt och skattkista | Skylten vecklar ut en skattkarta med adress och kartlänkar. Kistan öppnas med ett regn av pixelmynt |
 | Vad händer (`#act-program`) | Gaming, snacks, ta med (egen ruta) | – |
-| Bonus level (`#act-bonus`) | Minispel i `<canvas>` (src/game.ts) och topplistan under det | Tryck startar, tryck = hopp över buskar, block och fåglar. Tre liv. Under spelet: utfällbar "HIGH SCORE"-panel med den delade topplistan |
+| Bonus level (`#act-bonus`) | Minispel i `<canvas>` (src/game.ts, src/engine.ts) och topplistan under det | Tryck startar, tryck = hopp, ett tryck till i luften = dubbelhopp. Fyra miljöer med egna hinder. Tre liv. Under spelet: utfällbar "HIGH SCORE"-panel med den delade topplistan |
 | OSA (`#act-rsvp`) | Formuläret | Ja ger pixelkonfetti och "LEVEL UP!" |
 | High score (`#act-outro`) | "Vilgot – 10 år" och "Du?" (statisk dekoration, ingen koppling till topplistan) | Ljud av/på |
 
@@ -50,30 +50,75 @@ Beskärningen står i skriptet. Ändras porträttets beskärning måste solglas�
 
 ## Minispelet (Bonus level)
 
-`src/game.ts` (fysik, loop, inmatning) och `src/levels.ts` (miljöer, hinder, paletter), utan bibliotek. Budget 20 kB minifierat; nu 10 401 B (4,9 kB gzip), mätt med esbuild `--charset=utf8`, som bygget levererar. Spelet räknar i spelpixlar (192×96). Canvasen får bredden 192·k *enhetspixlar*, med k som heltal, och ritar med `ctx.scale(k)`, så varje spelpixel blir exakt k×k skärmpixlar.
+Tre filer, utan bibliotek:
+- `src/engine.ts`: reglerna, utan DOM. Fart, hopp och dubbelhopp, hinder, krockar och utplacering.
+- `src/levels.ts`: miljöer, hinder och fysik per miljö.
+- `src/game.ts`: ritning, tryck och loop.
+
+Budget 20 kB minifierat för alla tre. Nu 19 759 B (≈9 kB gzip), mätt med esbuild `--charset=utf8`, som bygget levererar.
+
+Spelet räknar i spelpixlar (192×96). Canvasen får bredden 192·k *enhetspixlar*, med k som heltal, och ritar med `ctx.scale(k)`, så varje spelpixel blir exakt k×k skärmpixlar.
 
 - **Start:** spelet startar bara på ett riktigt tryck (eller Mellanslag/Enter), aldrig av scroll. I viloläge släpps scrollgester igenom (`touch-action: pan-y`). Under spel äts all touch (`.playing` → `touch-action: none` + `preventDefault`), så ett hopp aldrig scrollar sidan.
 - **Loop:** körs med `requestAnimationFrame` bara under spel. Spelet pausas när det är mindre än 30 % synligt eller fliken döljs, och fortsätter bara på tryck.
+- **Exakt värld:** allt räknas ur speltiden.
+  - Sträckan är integralen av fartkurvan (`distAt`).
+  - Varje hinders läge är en funktion av sträckan (`xAt`).
+  - Gubbens höjd räknas ur hoppets startögonblick (`fy`).
+  - Spelet, utplaceringen och botarna ser därför samma värld, oavsett bildfrekvens.
+  - Krockar provas i delsteg på högst 4 px.
+- **Hopp och dubbelhopp:** ett tryck på marken hoppar. Ett andra tryck i luften ger ett nytt hopp med 60 % av ett vanligt hopps höjd och en liten pixelpuff under gubben. Ett tredje tryck gör inget förrän gubben landat. Rymden har lägre gravitation: lika högt hopp, men 0,76 s i luften i stället för 0,58.
 - **Poäng och liv:** poängen är sprungen sträcka. Tre krockar ger game over, med en kort skyddstid efter varje krock.
 - **Levels och miljöer:** ny level var 30:e sekund, med "LEVEL N" upptill och "LEVEL UP!" som blinkar till ett kort pling vid bytet.
-  - Miljöerna i ordning: gräs, grotta, stad, rymd. Därefter börjar varv 2 från början, med tätare hinder.
-  - Bytet sker utan paus. Himmel och mark tonar till den nya paletten under 1 s, och bakgrundsdekoren (moln, droppstenar, hus, stjärnor) byts när den har rullat ut till vänster.
-  - Hindren byter utseende per miljö (buske → stalagmit → trafikkon → krater, fågel → fladdermus → drönare → satellit, pelare → stenpelare → lastbil → raketdel) men behåller sina höjdklasser.
-- **Fart:** `vAt(t) = 70 + 2t + 0,022t²` spelpixlar/s, utan tak (150 vid 30 s, 270 vid 60 s, 430 vid 90 s). Över ~1 193 px/s syns de höga hindren för sent för att någon ska hinna hoppa, eftersom de kommer in i högerkanten. Den gränsen nås efter ~185 s, så spelet tar alltid slut, även för en perfekt spelare, efter 3–4 minuter. Hindren blir också tätare med tiden (`density()`), och 25 % tätare per varv.
-- **Hinder:** tre markhöjder (låga 6/8 px, mellan 16, höga 28), en rak flygare i huvudhöjd och en dykare i två varianter. Den tidiga dykaren når huvudhöjd innan den är framme och ska hoppas över. Den sena sveper över huvudet och kräver att man står kvar. Cirka 20 % av de låga hindren kommer i par.
-- **Rättvisa:** `jumpWindow()` räknar ut inom vilket avstånd ett avstamp klarar ett hinder vid aktuell fart. `minGap()` räknar ut det kortaste avstånd mellan två hinder som går att klara, och `nextGap()` slumpar aldrig under det, oavsett täthet. Fysiken delas upp i delsteg på högst 4 px, så att snabba hinder inte kan passera gubben mellan två bildrutor.
-  - Testsviten låter en bot som hoppar mitt i fönstret spela från start: den ska nå rymden, inte krocka före 3 min och dö inom 3–4 min speltid.
-  - En bot som aldrig hoppar ska dö inom 15 s.
+  - Miljöerna i ordning: gräs, grotta, stad, rymd. Därefter börjar varv 2.
+  - Bytet sker utan paus. Himmel och mark tonar under 1 s, och bakgrundsdekoren byts när den har rullat ut.
+- **Fart, sågtand:** farten stiger linjärt inom varje level och sänks 15 % vid nästa levelstart, med stigande baslinje och utan tak. Slutfarten per level (spelpixlar/s) står i `ENDS` i `engine.ts`, och efter tabellen ökar den 20 % per level. Relativa enheter där startfarten (70 px/s) = 50:
+
+  | Level | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+  |---|---|---|---|---|---|---|---|---|
+  | Start → slut | 50→101 | 86→174 | 148→286 | 243→348 | 296→424 | 360→516 | 439→629 | 534→964 |
+
+  Hindertätheten följer baslinjen (`density`).
+- **Spelet tar alltid slut**, även för en perfekt spelare. Hindren kommer in 162 px bort, och den höga klassen kräver avstamp tidigt. Över ~1 060 px/s (i rymden ~900 px/s, med långsammare hopp) syns de för sent.
+- **Hinder i alla miljöer:** låga (6/8 px), mellan (16), höga (28), breda höga (16 px breda, 28 höga), en rak flygare i huvudhöjd och en dykare i två varianter.
+  - Den tidiga dykaren ska hoppas över.
+  - Den sena sveper över huvudet: stå kvar.
+  - Från level 2 kommer fler höga hinder och fler par. Högst 6 hinder i rad saknar ett högt, så att spelet alltid tar slut.
+  - Ett *tätt högt par* (två breda väggar) går varken att klara med ett hopp eller två, bara med hopp + dubbelhopp. Paret läggs bara där det fungerar, eftersom fysiken inte tillåter det vid alla farter. I rymden klarar ett långt hopp båda väggarna, så där behövs inget dubbelhopp.
+- **Egna hinder per miljö, med förvarning:**
+
+  | Miljö | Hinder | Förvarning | Regel |
+  |---|---|---|---|
+  | Grotta | Stalaktit som lossnar och landar framför gubben | Droppar från taket ~1 s innan den lossnar | Hoppa |
+  | Grotta | Hängande stalaktit ner till strax ovanför huvudet | Syns | Hoppa inte |
+  | Stad | Öppet brunnslock (ramlar man i är det en krock) | Locket bredvid | Hoppa |
+  | Stad | Bilrad (liten snabb bil = låg, skåpbil = mellan), kör mot gubben | Trafikljuset blir rött ~1 s innan raden kommer | Hoppa, med bilens fart |
+  | Stad | Bil som bromsar in precis framför gubben | Bromsljus och rök | Vänta in den, eller förläng hoppet med ett dubbelhopp |
+  | Rymd | Meteorit som faller snett uppifrån och blir ett lågt eller mellanhögt hinder | Skugga på marken som växer ~1 s före nedslaget | Hoppa |
+  | Rymd | Rymdskepp som skjuter ett skott | Skeppet flyger in och siktar ~0,5 s | Skott i huvudhöjd: hoppa. Skott i hopphöjd: stå kvar |
+
+  Förvarningen börjar alltid ~1 s före, men ett hinder syns bara 162/v sekunder innan det når gubben. I hög fart syns förvarningen därför kortare (~0,3–0,75 s i grottan i varv 1).
+- **Rättvisa: utplaceringen spelar själv.** En "spökspelare" i `engine.ts` hoppar mitt i varje hoppfönster, med en bildrutas fördröjning per tryck, och ser alla hinder i förväg.
+  - Ett nytt hinder läggs aldrig så att spöket inte klarar det. Går det inte vid den farten hoppas hindret över.
+  - Vanliga hinder ska gå med vanliga hopp. Dubbelhopp krävs bara av täta höga par och räddar bromsande bilar.
+  - Synligheten räknas inte: den är spelets ärliga slut.
+  - Planeringen (`plan`, `rescue`) provar hoppbanor mot hindrens träffytor var 1/480 s.
+- **Botar** (`qa/bots.ts`) använder samma planering men olika kunskap. Testsviten kör dem i Node, 10 fasta frön vardera, och den perfekta också i webbläsaren med riktiga tryck.
+  - Perfekt (ser allt från första bildrutan): ska nå rymden, inte krocka före sikt-gränsen och dö inom 3:30–4:30.
+  - Mänsklig (reagerar 250 ms efter att ett hinder eller dess förvarning syns, och märker en inbromsning 250 ms sent): ska nå staden i minst 8/10 och rymden i minst 3/10, och dö inom 3 min.
+  - Passiv: ska dö inom 15 s.
+  - Perfekt utan dubbelhopp: dör vid de täta paren (bevis för att dubbelhoppet behövs).
 - **Dolt `?level=N`:** börjar direkt på level N med rätt fart. Decimaler går också, till exempel `?level=1.9` för att se ett levelbyte efter 3 s. Det är ett övningsläge, så varken rekordet eller topplistan påverkas.
 - **Rekord:** bästa poäng sparas per webbläsare (inte per gäst) i `localStorage` under `vilgots-kalas-best`, och rensas inte av `?reset=1`.
-- **Testkrokar:** `#game` har `data-state` (idle/run/pause/over), `data-lives`, `data-score`, `data-jumps`, `data-level` och `data-env`. Finns `window.__gameHook` när spelet startar får den läsa höjd, hinder, fart och speltid (används av botarna).
+- **Testkrokar:** `#game` har `data-state` (idle/run/pause/over), `data-lives`, `data-score`, `data-jumps`, `data-doubles`, `data-level` och `data-env`. Finns `window.__gameHook` när spelet startar får den motorn för pågående spel (`engine()`), som botarna använder.
 
 ## Topplistan (Firebase)
 
 Minispelet har en delad topplista i Firebase Realtime Database under `/scores/<gästnamn i gemener>` = `{ name, score, updatedAt }`. Koden ligger i `src/leaderboard.ts` (logik och visning) och `src/firebase-backend.ts` (Firebase-anropen och konfigurationen, som är publik by design).
 
-- **Bara opt-in.** Inget postas utan att gästen trycker "Ja!" i frågan "Nytt rekord! Posta på leaderboarden?", eller tidigare har kryssat "Posta alltid". Det valet sparas per gäst i `localStorage` (`vilgots-kalas-autopost:<gäst>`).
-- **Identitet.** Gästens identitet är `?g`-namnet, men bara om det finns i `guests` i `src/content.ts` (gemener jämförs). Utan giltigt `?g` fungerar spelet som förut med lokalt rekord, och game over-skärmen visar "Öppna din egen länk för att hamna på listan".
+- **Bara opt-in.** Inget postas utan att gästen trycker "Ja!" i frågan "Nytt rekord! Posta Familjen Vilgots rekord?", eller tidigare har kryssat "Posta alltid". Det valet sparas per gäst i `localStorage` (`vilgots-kalas-autopost:<gäst>`).
+- **Identitet.** Gästens identitet är `?g`-namnet, men bara om det finns i `guests` i `src/content.ts` (gemener jämförs). Utan giltigt `?g` fungerar spelet som förut med lokalt rekord, och listan och game over-skärmen visar "Du spelar utan inbjudningslänk. Öppna länken från sms:et för att tävla." Länkarna att skicka finns under [Sms-länkar](#sms-länkar).
+- **Visningsnamn.** Överallt på topplistan står "Familjen <Namn>" (listan, game over-skärmen och frågan). Databasnyckeln och det sparade namnet är fortfarande bara gästnamnet. Är raden på game over-skärmen för lång blir det "Fam. <Namn>".
 - **När frågan visas.** Frågan kommer när poängen slår gästens plats på listan och är högst hittills i sessionen. Ett nej frågas alltså inte om igen för en lägre poäng.
 - **Topplistan ligger direkt under spelet** som en utfällbar panel (`#board`). Rubriken "HIGH SCORE" med en pixelpil syns alltid och växlar färg i pixelsteg. Ett tryck fäller ut listan: topp 10, egen rad markerad, egen placering under om den är längre ner, och webbläsarens eget rekord sist.
   - Utfällt läge sparas i `localStorage` (`vilgots-kalas-board-open`).
@@ -87,11 +132,11 @@ Minispelet har en delad topplista i Firebase Realtime Database under `/scores/<g
 
 ### Databasreglerna – gör om varje gång `guests` ändras
 
-1. Kör `npm run rules`. Skriptet läser `guests` och skriver om `database.rules.json` (kräver Node 22.18 eller senare).
+1. Kör `npm run rules`. Skriptet läser `guests` och skriver om `database.rules.json` och sms-länkarna i README (kräver Node 22.18 eller senare).
 2. Öppna [Firebase-konsolen](https://console.firebase.google.com/) → projektet **vilgots-kalas** → **Build → Realtime Database** → fliken **Rules**.
 3. Markera allt i redigeraren och ta bort det. Klistra in hela innehållet i `database.rules.json`.
 4. Klicka **Publish**.
-5. Committa den nya `database.rules.json` tillsammans med ändringen i `content.ts`.
+5. Committa den nya `database.rules.json` och README tillsammans med ändringen i `content.ts`.
 
 Reglerna:
 - Alla får läsa `/scores`.
@@ -137,6 +182,14 @@ Lägg till `?g=Namn` i URL:en, så står det "…och Namn är bjuden på" i tite
 https://<user>.github.io/vilgots-kalas/?g=Emma
 ```
 
+## Sms-länkar
+
+En färdig länk per namn i `guests` (`src/content.ts`). Skicka varje gäst sin egen länk i sms:et. Bara med den kan gästen hamna på topplistan (som "Familjen <Namn>"), och namnet står i inbjudan och i OSA-formuläret. Listan skrivs om av `npm run rules` när `guests` ändras. Ändra den inte för hand.
+
+<!-- sms-länkar:start (skrivs av npm run rules – ändra inte för hand) -->
+- Vilgot: https://jaken-ux.github.io/vilgots-kalas/?g=Vilgot
+<!-- sms-länkar:end -->
+
 ## Sparat OSA-svar
 
 Svaret sparas bara i webbläsarens `localStorage`, **per gäst**: nyckeln är `vilgots-kalas-rsvp:<namn från ?g, gemener>` eller `vilgots-kalas-rsvp:default` utan `?g`. Lägg till `?reset=1` för att rensa alla sparade svar i den aktuella webbläsaren (ljudinställningen behålls). Sidan laddas då om utan parametern.
@@ -148,7 +201,7 @@ npm run build
 npx playwright test
 ```
 
-Sviten (`qa/verify.spec.ts`) startar `npm run preview` själv. Alla anrop till Formspree fångas och besvaras med ett fejkat svar, så inga riktiga OSA-svar skickas. All trafik mot Firebase (HTTP och websocket) stoppas, och topplistan testas mot en låtsasdatabas (`window.__leaderboardBackend`). Skärmdumpar och Lighthouse-data hamnar i `qa/` (gitignorerade).
+Sviten (`qa/verify.spec.ts`) startar `npm run preview` själv. Minispelets botar (`qa/bots.ts`) spelar i Node direkt mot `src/engine.ts`. Webbläsarboten (`qa/bot-browser.ts`) paketeras med esbuild och trycker med riktiga tryck på spelytan. Den fryser också spelet för skärmdumparna av varje hinder (`qa/screenshot-hinder-*.png`). Alla anrop till Formspree fångas och besvaras med ett fejkat svar, så inga riktiga OSA-svar skickas. All trafik mot Firebase (HTTP och websocket) stoppas, och topplistan testas mot en låtsasdatabas (`window.__leaderboardBackend`). Skärmdumpar och Lighthouse-data hamnar i `qa/` (gitignorerade).
 
 ## Deploya till GitHub Pages
 

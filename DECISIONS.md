@@ -2,6 +2,61 @@
 
 Nyast överst. Projektet är en kopia av Livias kalas. Posterna före 2026-10-23 kommer därifrån och gäller den ärvda koden.
 
+## 2026-10-24 — Minispelet körning B: sågtandsfart, dubbelhopp, nya hinder med förvarning, "Familjen <Namn>"
+**Motor utan DOM.** Reglerna flyttade från `game.ts` till `src/engine.ts`, så att botarna kan spela hela spel i Node (≈1 s per spel i stället för 4 min i webbläsaren). Allt räknas exakt ur speltiden: sträcka, hinders läge och gubbens höjd. Spel, utplacering och botar ser därför samma värld. `game.ts` ritar och tar emot tryck. Inmatnings- och scrollkoden är oförändrad. Testerna kräver nu `esbuild` som uttryckligt utvecklingsberoende, för att paketera webbläsarboten.
+
+**Fartkurvan (sågtand) fick andra siffror än beställningen.** Beställt i relativa enheter (start 50): L1 50→80, L2 68→105, L3 88→135, L4 112→170, sedan +25 % per varv. Med de siffrorna dör varken den mänskliga eller den perfekta boten inom kraven:
+- En spelare som reagerar på 250 ms klarar höga hinder upp till ~400 px/s (≈290 enheter). En perfekt spelare klarar dem upp till sikt-gränsen, ~1 060 px/s.
+- Slutkurvan, i relativa enheter: L1 50→101, L2 86→174, L3 148→286, L4 243→348, L5 296→424, L6 360→516, L7 439→629, L8 534→964, därefter +20 % per level.
+- Formen är behållen: stigning inom leveln, −15 % vid levelstart, stigande baslinje och täthet.
+- L8 stiger brantare. Då blir rymdens sikt-gräns (~900 px/s, långsammare hopp) passerad mitt i L8, och L9 börjar över gräsets gräns. Annars kunde en perfekt spelare överleva till ~4:45.
+- "+25 % per varv" går inte ihop med "−15 % vid varje levelstart": L5 skulle börja på 62 enheter efter L4:s 170. Därför fortsätter samma sågtand varv efter varv.
+- Fartkurvan liknar därmed körning A:s (150 px/s vid 30 s, 430 vid 90 s), med nedväxlingar.
+
+**Botstatistik, 90 frön per bot i Node:**
+- Perfekt (0 ms): game over 225,8–247,3 s (3:46–4:07), första krock tidigast 219,1 s, når rymden alltid.
+- Mänsklig (250 ms): game over 100,3–134,2 s, når staden och rymden alltid, L5 i 0–4 av 30.
+- Perfekt utan dubbelhopp: dör efter 40–78 s, vid de täta paren.
+- Passiv: dör efter ~5–6 s.
+- Kraven ("minst 8/10", "minst 3/10") är minimikrav. Att den mänskliga boten alltid når rymden ryms inom dem. Testsviten kör 10 fasta frön per bot; siffrorna i den körningen står längst ner.
+
+**Rättvisan bevisas av en spökspelare i utplaceringen, i stället för formler per hinderpar.** Spöket spelar perfekt (avstamp mitt i fönstret) och ser allt i förväg. Ett hinder läggs bara där spöket klarar det, och går det inte vid farten hoppas hindret över. Synligheten ignoreras, eftersom sikt-gränsen är spelets slut.
+- Förkastat: att bygga ut körning A:s `minGap`/`nextGap`. Med bilar som har egen fart, bromsande bilar, fallande hinder och dubbelhopp blev parformlerna ohanterliga.
+- Kostnad: utplaceringen tar högst ~5 ms i en enstaka bildruta (Node), i snitt 0,01 ms.
+
+**Fel som botarna hittade och som är rättade:**
+- Boten trycker i första bildrutan efter planerad tid, spöket exakt. I en kedja av hopp direkt vid landning hamnade boten 6 bildrutor efter och krockade med en hängande stalaktit. Spöket räknar nu med en bildrutas fördröjning per hopp (`LAG`).
+- Breda väggar har för smalt fönster i låg fart. Utplaceringen sköt dem bakåt i 2,4 s och placerade dem sedan ändå. Nu hoppas de över, och kravet på fönster efter avstampet är relativt fönstrets bredd.
+
+**Dubbelhopp:** ett andra tryck i luften ger ett nytt hopp med 60 % av ett vanligt hopps *höjd* (antagande: "60 % av det första" tolkat som höjd, inte fart). Pixelpuff och ett eget ljud.
+- Det behövs vid *täta höga par*: två breda väggar (16 px) så nära att varken ett hopp över båda eller två hopp går.
+- Paret läggs bara där fysiken tillåter. Vid hög fart klaras ett par alltid med ett eller två vanliga hopp, så paren finns i L2, L3, L5, L6 och L7. I rymden klarar ett långt hopp båda väggarna, och det är rymdens särdrag.
+- Förkastat: en extra hög klass som bara går med dubbelhopp. Den ändrar höjdklasserna och blir lika fartbegränsad.
+- Vanliga hinder placeras så att vanliga hopp räcker, och bromsande bilar kan kräva ett dubbelhopp som räddning. Från level 2 kommer fler höga hinder och fler par, och högst 6 hinder i rad saknar ett högt.
+
+**Förvarningar:** de börjar ~1 s före (dropp, skugga, rött ljus), men ett hinder syns bara 162/v s innan det når gubben. Fallande hinder landar därför så nära gubben som är rättvist (minst 12 px framför). Synlig förvarning blir då ~0,75 s vid 120 px/s och ~0,3 s vid 240 px/s.
+- Trafikljuset står fast i bildens högerkant i stället för att rulla med gatan. Rullande hade det bara synts ~0,4 s.
+- Skeppet syns 0,55 s innan det skjuter.
+
+**Topplistan:** visningsnamnet är "Familjen <Namn>" överallt. Databasnyckeln och det sparade namnet är oförändrade, så reglerna behöver inte publiceras om.
+- Frågan lyder "Nytt rekord! Posta Familjen Vilgots rekord?" ("Nytt rekord!" är behållet framför den beställda frågan).
+- Genitiv: namn på s, x eller z får inget extra s.
+- Game over-raden kortas till "Fam. <Namn>" om den inte ryms på 23 tecken.
+- Utan giltig `?g`: "Du spelar utan inbjudningslänk. Öppna länken från sms:et för att tävla.", på game over-skärmen med ettan ovanför och på fyra rader.
+
+**Sms-länkar** skrivs i README av `npm run rules` (från `guests` och nya `content.site.url`). Ett test kontrollerar att README stämmer med gästlistan.
+
+**Övrigt:** instruktionen ovanför spelet nämner nu dubbelhoppet. Trafikljuset släcks senast 3 s efter att det tänts, eftersom en bilrad kan avbrytas av ett miljöbyte.
+
+**Verifiering (full nivå: spellogik, topplista och bundle ändrade):**
+- Hela sviten: 73/74 gick igenom. Felet var skärmdumpstestet för rymden, där inget skepp sköt under L4. Testet startar nu om leveln, högst tre gånger. Därefter 27/27 för spelet.
+- Testsvitens 10 frön: perfekt 226–245 s (första krock ≥ 219 s), mänsklig 103–121 s (alla når rymden), utan dubbelhopp 41–78 s.
+- Perfekt bot i webbläsaren med riktiga tryck: game over 232,0 s (första krock 221,4 s), level 8.
+- Spelet (engine + levels + game) 19 759 B av 20 kB. Huvudbundlen 176,50 kB (+10,35 kB mot körning A).
+- Lighthouse mobil, tre körningar: 98, 98, 98.
+
+Commit: "Game balance, double jump, new obstacles".
+
 ## 2026-10-24 — Levels och miljöer i minispelet (körning A), utan farttak
 Ny level var 30:e sekund (`LEVEL N`, blinkande "LEVEL UP!" och pling). Miljöerna är gräs → grotta → stad → rymd, därefter varv 2 med 25 % tätare hinder. Ingen ny mekanik. Hindren byter utseende men behåller höjdklasserna (låg 6/8, mellan 16, hög 28, flygare i huvudhöjd), så rättvisekalkylen gäller i alla miljöer. Miljöerna ligger i `src/levels.ts`.
 

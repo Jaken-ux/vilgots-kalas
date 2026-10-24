@@ -224,14 +224,14 @@
     <section class="act act-bonus" id="act-bonus">
       <div class="act-inner">
         <h2 class="act-title reveal">Bonus level</h2>
-        <p class="bonus-hint reveal">Tryck på spelet för att starta. Tryck igen för att hoppa över buskar, block och fåglar. Tre krockar så är det game over.</p>
+        <p class="bonus-hint reveal">Tryck på spelet för att starta. Tryck för att hoppa, och en gång till i luften för ett dubbelhopp. Tre krockar så är det game over.</p>
         <div class="game-wrap">
           <div class="game px" id="game" tabindex="0" role="button" aria-label="Minispel: tryck för att starta, tryck igen för att hoppa" aria-describedby="game-status" data-state="idle">
             <canvas id="game-canvas" width="192" height="96"></canvas>
           </div>
           <!-- Fråga vid nytt rekord (src/leaderboard.ts). Inget postas utan Ja. -->
           <div class="game-panel" id="game-panel" role="dialog" aria-labelledby="game-panel-title" hidden>
-            <p class="game-panel-title" id="game-panel-title">Nytt rekord! Posta på leaderboarden?</p>
+            <p class="game-panel-title" id="game-panel-title">Nytt rekord! Posta ditt rekord?</p>
             <div class="panel-buttons">
               <button type="button" class="btn btn-post px" id="btn-post-yes">Ja!</button>
               <button type="button" class="btn btn-post no px" id="btn-post-no">Nej tack</button>

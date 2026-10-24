@@ -64,11 +64,27 @@ function withTimeout<T>(p: Promise<T>): Promise<T> {
   ]);
 }
 
+// Visningsnamnet överallt på topplistan: "Familjen Vilgot". Databasnyckeln och
+// det sparade namnet är fortfarande bara gästnamnet.
+export const family = (name: string) => `Familjen ${name}`;
+// Genitiv: "Familjen Vilgots", men "Familjen Elias" (slutar på s, x eller z)
+export const genitive = (s: string) => (/[sxz]$/i.test(s) ? s : s + "s");
+// Utan giltig ?g-länk: ingen plats på listan
+export const NO_LINK = "Du spelar utan inbjudningslänk. Öppna länken från sms:et för att tävla.";
+const NO_LINK_LINES = ["Du spelar utan", "inbjudningslänk.", "Öppna länken från", "sms:et för att tävla."];
+
 // Versalt Å saknar synlig ring i Press Start 2P (och Ä/Ö blir små): sådana namn
 // skrivs med gemener i pixelfonten, "Åsa" → "åsa". Datan ändras inte.
 export const pixelSafe = (name: string) => (/[ÅÄÖ]/.test(name) ? name.toLowerCase() : name);
 
-const pad = (s: string, n: number) => (s.length > n ? s.slice(0, n) : s + " ".repeat(n - s.length));
+// En rad på game over-skärmen (högst 23 tecken): "1. Familjen Vilgot 1234".
+// Räcker inte platsen blir det "Fam. Vilgot", annars kapas namnet.
+export function scoreLine(rank: number, name: string, score: number) {
+  const room = 23 - String(rank).length - 3 - String(score).length;
+  let n = family(name);
+  if (n.length > room) n = `Fam. ${name}`;
+  return `${rank}. ${pixelSafe(n.slice(0, room)).padEnd(room)} ${score}`;
+}
 
 interface Options {
   guest: string; // ?g-namnet (kan vara tomt eller okänt)
@@ -155,13 +171,13 @@ export function initLeaderboard(opts: Options) {
     else if (status === "fail") items.push(note("Topplistan svarar inte just nu", "hs-error"));
     else {
       for (const r of rows.slice(0, 10)) {
-        items.push(row(String(r.rank), pixelSafe(r.name), String(r.score), r.key === me?.key ? "hs-me" : ""));
+        items.push(row(String(r.rank), pixelSafe(family(r.name)), String(r.score), r.key === me?.key ? "hs-me" : ""));
       }
       const mine = me && rows.find((r) => r.key === me.key);
-      if (mine && mine.rank > 10) items.push(row("", "…", ""), row(String(mine.rank), pixelSafe(mine.name), String(mine.score), "hs-me"));
+      if (mine && mine.rank > 10) items.push(row("", "…", ""), row(String(mine.rank), pixelSafe(family(mine.name)), String(mine.score), "hs-me"));
       if (!rows.length) items.push(note("Ingen på listan än – bli först!"));
       if (me && !mine) items.push(row(String(rows.length + 1), "Du?", "???", "hs-you"));
-      if (!me) items.push(note("Öppna din egen länk för att hamna på listan"));
+      if (!me) items.push(note(NO_LINK));
     }
     const best = opts.localBest();
     if (best > 0) items.push(note(`Ditt rekord: ${best}`, "hs-local"));
@@ -169,26 +185,29 @@ export function initLeaderboard(opts: Options) {
   };
 
   // ----- Topp 3 och egen placering på game over-skärmen -----
+  // Utan giltig ?g: bara ettan och raderna om inbjudningslänken (max 5 rader)
   const renderInfo = () => {
     if (!game || lastOver === null) return;
     const lines: InfoLine[] = [];
+    const sr: string[] = []; // samma sak i hela meningar för skärmläsare
+    const add = (t: string, c: string) => (lines.push([t, c]), sr.push(t));
+    const noLink = () => (lines.push(...NO_LINK_LINES.map((t): InfoLine => [t, PALETTE.b])), sr.push(NO_LINK));
     if (status === "fail" || postFailed) {
-      lines.push([postFailed ? "Kunde inte posta" : "Topplistan svarar inte", PALETTE.r]);
-      lines.push([`Ditt rekord: ${opts.localBest()}`, PALETTE.b]);
+      add(postFailed ? "Kunde inte posta" : "Topplistan svarar inte", PALETTE.r);
+      add(`Ditt rekord: ${opts.localBest()}`, PALETTE.b);
     } else if (status === "ok") {
-      for (const r of rows.slice(0, 3)) {
-        lines.push([`${r.rank}. ${pad(pixelSafe(r.name), 10)} ${String(r.score).padStart(5)}`, r.key === me?.key ? PALETTE.n : PALETTE.w]);
+      for (const r of rows.slice(0, me ? 3 : 1)) {
+        lines.push([scoreLine(r.rank, r.name, r.score), r.key === me?.key ? PALETTE.n : PALETTE.w]);
+        sr.push(`${r.rank}. ${family(r.name)} ${r.score}`);
       }
       const mine = me && rows.find((r) => r.key === me.key);
-      if (!me) lines.push(["Öppna din egen länk", PALETTE.b], ["för att hamna på listan", PALETTE.b]);
-      else if (mine) lines.push([`Du: plats ${mine.rank} (${mine.score})`, PALETTE.n]);
-      else lines.push(["Du är inte på listan än", PALETTE.b]);
-    } else if (!me) {
-      lines.push(["Öppna din egen länk", PALETTE.b], ["för att hamna på listan", PALETTE.b]);
-    }
+      if (!me) noLink();
+      else if (mine) add(`Du: plats ${mine.rank} (${mine.score})`, PALETTE.n);
+      else add("Du är inte på listan än", PALETTE.b);
+    } else if (!me) noLink();
     game.info(lines);
-    const sr = document.getElementById("board-status");
-    if (sr) sr.textContent = lines.map(([t]) => t).join(". ");
+    const live = document.getElementById("board-status");
+    if (live) live.textContent = sr.join(". ");
   };
 
   const setStatus = (s: typeof status) => {
@@ -321,6 +340,8 @@ export function initLeaderboard(opts: Options) {
       if (score <= (mine?.score ?? 0) || score <= offered) return;
       offered = score;
       if (autoPost()) return void post(score);
+      const title = document.getElementById("game-panel-title");
+      if (title) title.textContent = `Nytt rekord! Posta ${family(genitive(me.name))} rekord?`;
       if (always) always.checked = false;
       panel.hidden = false;
       game?.hold(true);

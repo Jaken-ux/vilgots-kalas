@@ -2,11 +2,14 @@ import { test, expect, devices } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { KINDS, jumpWindow, minGap, nextGap, vAt, SIGHT, density } from "../src/game";
+import { vAt, levelStart, density, hazard, plan, samples, fy, xAt, LEVEL_SECONDS, W } from "../src/engine";
+import { simulate, type RunResult } from "./bots";
+import { buildSync } from "esbuild";
 import { ENVS } from "../src/levels";
-import { ranking, guestIdentity, pixelSafe } from "../src/leaderboard";
+import { ranking, guestIdentity, pixelSafe, family, genitive, scoreLine, NO_LINK } from "../src/leaderboard";
+import { content } from "../src/content";
 // @ts-expect-error – .mjs utan typer
-import { buildRules } from "../scripts/gen-rules.mjs";
+import { buildRules, smsLinks, withSmsLinks } from "../scripts/gen-rules.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1072,97 +1075,122 @@ test.describe("Bonus level (minispel)", () => {
 test.describe("Bonus level: svårighet, levels och rättvisa", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
-  // Ren fysik, ingen webbläsare. I varje miljö: varje hinder går att klara från
-  // farten där miljön först dyker upp och ända upp till synlighetsgränsen, och
-  // slumpat avstånd är aldrig kortare än det fysiska minimumet – oavsett täthet.
-  test("every obstacle in every environment has a jump window and every gap is clearable", () => {
-    const limit = (k: (typeof KINDS)["pillar"]) => {
-      let v = 70;
-      while (jumpWindow(k, v)[0] <= SIGHT) v++;
-      return v;
-    };
-    // Avvikelser samlas och kontrolleras en gång (100 000 enskilda expect tog 14 min)
+  // Fartkurvan: sågtand. Stiger inom varje level, ~15 % lägre vid varje
+  // levelstart, stigande baslinje och täthet, inget tak.
+  test("speed curve: sawtooth with a rising baseline, denser with the baseline, no cap", () => {
+    for (let n = 1; n <= 12; n++) {
+      const t0 = (n - 1) * LEVEL_SECONDS;
+      expect(vAt(t0 + 29.9), `level ${n} stiger`).toBeGreaterThan(vAt(t0) * 1.3);
+      if (n === 1) continue;
+      expect(vAt(t0) / vAt(t0 - 1e-6), `level ${n} börjar 15 % lägre`).toBeCloseTo(0.85, 3);
+      expect(levelStart(n), `baslinjen stiger vid level ${n}`).toBeGreaterThan(levelStart(n - 1));
+      expect(density(t0)).toBeLessThanOrEqual(density(t0 - LEVEL_SECONDS));
+    }
+    expect(vAt(0)).toBe(70); // dagens startfart
+    expect(density(0)).toBe(1);
+    expect(density(4 * LEVEL_SECONDS)).toBeLessThan(0.5);
+    expect(vAt(600)).toBeGreaterThan(vAt(570)); // inget tak
+  });
+
+  // Ren fysik, ingen webbläsare: varje hindertyp i varje miljö har en
+  // klarningsregel vid alla farter miljön har i varv 1 och 2 – ett hoppfönster
+  // som går att träffa (minst två bildrutor), eller "stå kvar" där ett hopp
+  // verkligen krockar. Förvarningar: fallande hinder landar framför gubben och
+  // i bild, skeppet syns före skottet.
+  test("every obstacle kind in every environment has a clearing rule at every speed", () => {
     const bad: string[] = [];
+    const rules: Record<string, string> = {};
     ENVS.forEach((env, i) => {
-      // Samma höjdklasser överallt: låg 6/8, mellan 16, hög 28, flygare i huvudhöjd
-      expect([env.kinds.bush.h, env.kinds.block.h, env.kinds.big.h, env.kinds.pillar.h], env.name).toEqual([6, 8, 16, 28]);
-      expect([env.kinds.bird.y, env.kinds.dive.y], env.name).toEqual([KINDS.bird.y, KINDS.dive.y]);
-      const kinds = Object.entries(env.kinds);
-      for (let v = Math.floor(vAt(i * 30)); v < limit(env.kinds.pillar); v += 10) {
-        for (const [an, a] of kinds) {
-          const [lo, hi] = jumpWindow(a, v);
-          if (!a.stand && hi - lo <= 10) bad.push(`${env.name} ${an} fönster ${(hi - lo).toFixed(1)} px vid v=${v}`);
-          for (const [bn, b] of kinds) {
-            const min = minGap(a, b, v);
-            for (const dens of [1, density(150), density(200)]) {
-              for (const r of [0, 1]) {
-                if (nextGap(a, b, v, r, false, dens) < min + 6) bad.push(`${env.name} ${an}→${bn} v=${v} täthet ${dens}`);
-              }
+      for (const lvl of [i + 1, i + 5]) {
+        for (let t0 = (lvl - 1) * LEVEL_SECONDS + 0.5; t0 < lvl * LEVEL_SECONDS; t0 += 1) {
+          for (const n of Object.keys(env.kinds)) {
+            // Breda väggar (täta höga par) kommer först från level 2: i
+            // gräsets level 1-fart är fönstret för smalt
+            if (n === "wall" && lvl === 1) continue;
+            const o = hazard(n, t0, env);
+            const sm = samples(o);
+            const id = `${env.name} ${n} t=${t0}`;
+            const stand = sm.lo.every((lo) => lo >= 0);
+            rules[`${env.name} ${n}`] = stand ? "stå kvar" : "hoppa";
+            if (stand) {
+              // Inget hopp behövs – och ett hopp under överlappet krockar
+              if (plan(t0 - 3, [o])?.at !== Infinity) bad.push(`${id}: stå-kvar-hinder kräver hopp`);
+              const fl = { t: sm.start - 0.12, g: env.g, v0: env.v0 };
+              if (!sm.t.some((t, j) => fy(fl, t) > sm.lo[j] && fy(fl, t) < sm.hi[j])) bad.push(`${id}: ett hopp krockar inte`);
+            } else {
+              const p = plan(t0 - 3, [o]);
+              if (!p || p.at === Infinity) bad.push(`${id}: inget hoppfönster`);
             }
-            if (a.pair && b.pair && nextGap(a, b, v, 0, true) < min) bad.push(`${env.name} par ${an}→${bn} v=${v}`);
+            if (o.k.drop && !(o.on < sm.start && xAt(o, o.on) <= W)) bad.push(`${id}: landar inte framför gubben i bild`);
+            if (o.k.shot && !(o.seen <= o.on - 0.5)) bad.push(`${id}: skeppet syns för sent`);
           }
         }
       }
+      // Samma höjdklasser i alla miljöer
+      expect([env.kinds.bush.h, env.kinds.block.h, env.kinds.big.h, env.kinds.pillar.h, env.kinds.wall.h], env.name).toEqual([6, 8, 16, 28, 28]);
     });
+    console.log("klarningsregler:", JSON.stringify(rules));
     expect(bad).toEqual([]);
-    expect(KINDS.pillar.w).toBeLessThan(KINDS.bush.w);
-    // Tätheten ökar med tiden och mer i varv 2
-    expect(density(0)).toBe(1);
-    expect(density(100)).toBeLessThan(density(50));
-    expect(density(130)).toBeLessThan(density(110) * 0.8);
+    // Reglerna för de nya hindren
+    expect(rules["grotta hang"]).toBe("stå kvar");
+    expect(rules["rymd shotHigh"]).toBe("stå kvar");
+    for (const r of ["grotta drop", "stad hole", "stad car", "stad van", "rymd meteor", "rymd meteorBig", "rymd shotLow"]) expect(rules[r], r).toBe("hoppa");
   });
 
-  // Fartkurvan: utan tak, och den höga klassen syns för sent först efter 180–195 s
-  test("speed has no cap and crosses the sight limit after 180–195 s", () => {
-    let t = 0;
-    while (jumpWindow(KINDS.pillar, vAt(t))[0] <= SIGHT) t += 0.5;
-    expect(t).toBeGreaterThan(180);
-    expect(t).toBeLessThan(195);
-    for (const env of ENVS) {
-      expect(jumpWindow(env.kinds.pillar, vAt(t))[0], env.name).toBeGreaterThan(SIGHT);
+  // Botarna i Node mot samma motor som spelet (qa/bots.ts), 10 fasta frön
+  // vardera. Statistiken skrivs ut för DECISIONS.md.
+  const SEEDS = Array.from({ length: 10 }, (_, i) => i + 1);
+  const report = (name: string, rs: RunResult[]) =>
+    console.log(
+      `${name}: game over ${rs.map((r) => r.end.toFixed(0)).join(" ")} s | level ${rs.map((r) => r.level).join(" ")} | första krock ${rs
+        .map((r) => r.crashes[0].toFixed(0))
+        .join(" ")} | dubbelhopp ${rs.map((r) => r.doubles).join(" ")}`
+    );
+
+  test("perfect bot (0 ms): always reaches space, never crashes before the sight limit, game over within 3:30–4:30", () => {
+    const rs = SEEDS.map((s) => simulate(s, 0));
+    report("perfekt", rs);
+    for (const r of rs) {
+      expect(r.level, "nådde rymden").toBeGreaterThanOrEqual(4);
+      expect(r.crashes[0], "ingen krock före sikt-gränsen (~3:40)").toBeGreaterThan(210);
+      expect(r.end).toBeGreaterThan(210);
+      expect(r.end).toBeLessThan(270);
+      expect(r.doubles, "använder dubbelhopp").toBeGreaterThan(0);
     }
-    expect(vAt(300)).toBeGreaterThan(vAt(240)); // inget tak
-    // Verklig gräns för en spelare med 60 bildrutor/s: hindret hinner flytta sig
-    // en bildruta (v/60) innan det första gången syns
-    let te = 0;
-    while (jumpWindow(KINDS.pillar, vAt(te))[0] <= SIGHT - vAt(te) / 60) te += 0.5;
-    expect(te).toBeGreaterThan(170);
-    expect(te).toBeLessThan(185);
+    // Alla nya hinder (och täta höga par, bromsande bilar) förekom
+    const kinds = rs.reduce<Record<string, number>>((a, r) => {
+      for (const [k, v] of Object.entries(r.kinds)) a[k] = (a[k] ?? 0) + v;
+      return a;
+    }, {});
+    console.log("hinder i perfekta körningar:", JSON.stringify(kinds));
+    const brakes = Object.keys(kinds).filter((k) => k.endsWith("+broms"));
+    expect(brakes.length).toBeGreaterThan(0);
+    for (const k of ["drop", "hang", "hole", "car", "van", "meteor", "meteorBig", "shotLow", "shotHigh", "wall+tvilling"]) {
+      expect(kinds[k] ?? 0, k).toBeGreaterThan(0);
+    }
   });
 
-  // Boten körs inne i sidan och trycker via riktiga pointerdown på spelytan.
-  // "Hoppa när hindret är X px bort", X = mitt i hoppfönstret vid aktuell fart.
-  // __crash = speltid för varje krock, __maxLevel = högsta level.
-  const startBot = async (page: Page, jumpAtAll: boolean, url = "/") => {
-    await page.addInitScript((jumpAtAll) => {
-      const w = window as any;
-      w.__kinds = [];
-      w.__crash = [];
-      w.__maxLevel = 0;
-      w.__gameHook = (api: any) => {
-        w.__api = api;
-        let prev: unknown = null;
-        let lives = 3;
-        const tick = () => {
-          const el = document.getElementById("game")!;
-          const o = api.obs().find((o: any) => o.x + o.k.w > 26);
-          if (o && o !== prev) w.__kinds.push(o.k);
-          prev = o;
-          if (Number(el.dataset.lives) < lives) w.__crash.push(api.t());
-          lives = Number(el.dataset.lives);
-          w.__maxLevel = Math.max(w.__maxLevel, Number(el.dataset.level));
-          if (jumpAtAll && el.dataset.state === "run" && api.y() === 0 && o && !o.k.stand) {
-            const [lo, hi] = api.win(o.k, api.v());
-            const d = o.x - 30;
-            if (d <= (lo + hi) / 2 && d >= lo) {
-              el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
-            }
-          }
-          requestAnimationFrame(tick);
-        };
-        requestAnimationFrame(tick);
-      };
-    }, jumpAtAll);
+  test("human bot (250 ms): reaches the city in ≥ 8/10 and space in ≥ 3/10, game over within 3 min", () => {
+    const rs = SEEDS.map((s) => simulate(s, 0.25));
+    report("mänsklig", rs);
+    expect(rs.filter((r) => r.level >= 3).length).toBeGreaterThanOrEqual(8);
+    expect(rs.filter((r) => r.level >= 4).length).toBeGreaterThanOrEqual(3);
+    for (const r of rs) expect(r.end).toBeLessThan(180);
+  });
+
+  test("passive bot: game over within 15 s; without double jump even a perfect bot dies early", () => {
+    for (const s of SEEDS) expect(simulate(s, null).end).toBeLessThan(15);
+    // Dubbelhoppet behövs: utan det dör en perfekt bot vid de täta höga paren
+    const rs = SEEDS.map((s) => simulate(s, 0, 400, 0, false));
+    report("perfekt utan dubbelhopp", rs);
+    for (const r of rs) expect(r.end).toBeLessThan(120);
+  });
+
+  // Webbläsarboten: samma bot, paketerad, trycker med riktiga pointerdown
+  const BOT = buildSync({ entryPoints: [path.join(QA_DIR, "bot-browser.ts")], bundle: true, write: false, format: "iife" }).outputFiles[0].text;
+  const startBot = async (page: Page, delay: number | null, url = "/") => {
+    await page.addInitScript((d) => ((window as any).__botDelay = d), delay);
+    await page.addInitScript({ content: BOT });
     await page.goto(url);
     await page.waitForLoadState("networkidle");
     // Utan mjuk scroll: ett tryck medan sidan scrollar stoppar bara scrollen
@@ -1176,10 +1204,10 @@ test.describe("Bonus level: svårighet, levels och rättvisa", () => {
     expect(await page.getAttribute("#game", "data-state")).toBe("run");
   };
 
-  test("(a) a perfect bot reaches space, never crashes before ~3 min, and is game over within 3–4 min", async ({ page }) => {
+  test("(a) in the browser: the perfect bot reaches space and is game over within 3:30–4:30", async ({ page }) => {
     test.setTimeout(330000);
     const errors = trackErrors(page);
-    await startBot(page, true);
+    await startBot(page, 0);
     await expect
       .poll(() => page.getAttribute("#game", "data-state"), { timeout: 300000, intervals: [2000] })
       .toBe("over");
@@ -1187,25 +1215,67 @@ test.describe("Bonus level: svårighet, levels och rättvisa", () => {
       const w = window as any;
       return { crash: w.__crash as number[], level: w.__maxLevel as number, end: w.__api.t() as number, kinds: w.__kinds };
     });
-    console.log(`perfekt bot: krockar vid ${r.crash.map((t) => t.toFixed(1)).join(", ")} s, game over vid ${r.end.toFixed(1)} s speltid, level ${r.level}`);
+    console.log(`perfekt bot i webbläsaren: krockar vid ${r.crash.map((t) => t.toFixed(1)).join(", ")} s, game over vid ${r.end.toFixed(1)} s, level ${r.level}`);
+    console.log("hinder:", JSON.stringify(r.kinds));
     expect(r.level, "nådde rymden (level 4)").toBeGreaterThanOrEqual(4);
-    // Första krocken kommer när hindren syns för sent för en 60 fps-spelare (~177 s)
-    expect(r.crash[0], "ingen krock före ~3 min").toBeGreaterThan(170);
-    expect(r.end).toBeGreaterThan(180);
-    expect(r.end).toBeLessThan(240);
-    // Alla markhöjder och minst en dykare var med
-    const heights = new Set(r.kinds.filter((k: any) => k.dive === undefined).map((k: any) => k.h));
-    expect([...heights]).toEqual(expect.arrayContaining([6, 8, 16, 28]));
-    expect(r.kinds.some((k: any) => k.dive !== undefined), "dykare").toBe(true);
+    expect(r.crash[0], "ingen krock före sikt-gränsen").toBeGreaterThan(210);
+    expect(r.end).toBeGreaterThan(210);
+    expect(r.end).toBeLessThan(270);
+    expect(Number(await page.getAttribute("#game", "data-doubles"))).toBeGreaterThan(0);
     expect(errors).toEqual([]);
   });
 
   test("(b) a bot that never jumps is game over within 15 s", async ({ page }) => {
-    await startBot(page, false);
+    await startBot(page, null);
     const t0 = Date.now();
     await expect.poll(() => page.getAttribute("#game", "data-state"), { timeout: 15000, intervals: [250] }).toBe("over");
     expect(Date.now() - t0).toBeLessThan(15000);
     expect(await page.getAttribute("#game", "data-jumps")).toBe("0");
+  });
+
+  test("double jump: a second tap in the air jumps again with a puff, a third does nothing", async ({ page }) => {
+    await page.addInitScript(() => ((window as any).__sfx = []));
+    await page.addInitScript({ content: BOT });
+    await page.addInitScript(() => ((window as any).__botDelay = null));
+    await page.goto("/");
+    await page.waitForLoadState("networkidle");
+    await page.evaluate(() => {
+      document.documentElement.style.scrollBehavior = "auto";
+      document.getElementById("game")!.scrollIntoView({ block: "center" });
+    });
+    await page.waitForTimeout(300);
+    const game = page.locator("#game");
+    await game.tap();
+    // Tre tryck i följd inne i sidan: hopp, dubbelhopp (efter 150 ms), inget
+    const r = await page.evaluate(
+      () =>
+        new Promise<{ y: number[]; puffs: number }>((resolve) => {
+          const w = window as any;
+          const el = document.getElementById("game")!;
+          const tap = () => el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
+          const e = w.__api.engine();
+          tap();
+          setTimeout(() => {
+            const before = e.y;
+            tap();
+            const puffs = e.puffs.length;
+            setTimeout(() => {
+              tap();
+              resolve({ y: [before, e.y], puffs });
+            }, 100);
+          }, 150);
+        })
+    );
+    expect(await page.getAttribute("#game", "data-jumps")).toBe("1");
+    expect(await page.getAttribute("#game", "data-doubles")).toBe("1");
+    expect(r.puffs).toBe(1);
+    expect(r.y[1], "dubbelhoppet lyfter vidare").toBeGreaterThan(r.y[0]);
+    const sfx: string[] = await page.evaluate(() => (window as any).__sfx);
+    expect(sfx).toContain("double");
+    // Efter landningen: ett vanligt hopp igen
+    await page.waitForTimeout(1200);
+    await game.tap();
+    expect(await page.getAttribute("#game", "data-jumps")).toBe("2");
   });
 
   // (c) Varje level via ?level=N: rätt miljö, rätt fart, inga fel. Skärmdump per miljö.
@@ -1214,7 +1284,7 @@ test.describe("Bonus level: svårighet, levels och rättvisa", () => {
     test(`(c) ?level=${n} starts in ${env} at the right speed and renders without errors`, async ({ page, browser }) => {
       const errors = trackErrors(page);
       await page.addInitScript(() => localStorage.setItem("vilgots-kalas-best", "7"));
-      await startBot(page, true, `/?level=${n}`);
+      await startBot(page, 0, `/?level=${n}`);
       expect(await page.getAttribute("#game", "data-level")).toBe(String(n));
       expect(await page.getAttribute("#game", "data-env")).toBe(env);
       const v = await page.evaluate(() => (window as any).__api.v());
@@ -1228,7 +1298,7 @@ test.describe("Bonus level: svårighet, levels och rättvisa", () => {
         await ctx.route(FIREBASE, (r) => r.abort());
         await ctx.routeWebSocket(FIREBASE, (ws) => ws.close());
         const p2 = await ctx.newPage();
-        await startBot(p2, true, `/?level=${n}`);
+        await startBot(p2, 0, `/?level=${n}`);
         await p2.waitForTimeout(3000);
         await p2.locator("#game").screenshot({ path: path.join(QA_DIR, `screenshot-env-${n}-${env}-dpr3.png`) });
         await ctx.close();
@@ -1242,7 +1312,7 @@ test.describe("Bonus level: svårighet, levels och rättvisa", () => {
   test("level up: blink, pling and a fade to the next environment without a pause", async ({ page }) => {
     await page.addInitScript(() => ((window as any).__sfx = []));
     const errors = trackErrors(page);
-    await startBot(page, true, "/?level=1.93"); // 27,9 s in i level 1
+    await startBot(page, 0, "/?level=1.93"); // 27,9 s in i level 1
     expect(await page.getAttribute("#game", "data-env")).toBe("gras");
     // Himlens färg mäts inne i sidan 300 ms efter bytet (mitt i den 1 s långa
     // övergången) och 1,3 s efter – poll från testet kommer för sent
@@ -1272,6 +1342,105 @@ test.describe("Bonus level: svårighet, levels och rättvisa", () => {
     await page.locator("#game").screenshot({ path: path.join(QA_DIR, "screenshot-env-overgang.png") });
     expect(errors).toEqual([]);
   });
+
+  // Skärmdumpar av varje nytt hinder och av dubbelhoppet, i telefonupplösning.
+  // Den perfekta boten spelar; när ett läge inträffar fryses spelet (inga nya
+  // bildrutor) och spelytan fotograferas. Slumpen seedas (Math.random), med ett
+  // frö där Node-simuleringen visar att hindren kommer inom levelns 26 första s.
+  const SHOTS: [number, string[], [string, string][]][] = [
+    [2, ["drop", "hang", "wall+tvilling"], [["stalaktit-droppar", "drip"], ["stalaktit-faller", "fall"], ["stalaktit-landad", "landed"], ["stalaktit-hanger", "hang"], ["dubbelhopp", "double"]]],
+    [3, ["hole", "+broms"], [["brunn", "hole"], ["trafikljus-bilar", "light"], ["bil-bromsar", "brake"]]],
+    [4, ["meteor", "shotLow|shotHigh"], [["meteorit-skugga", "meteor"], ["meteorit-landad", "meteorLanded"], ["rymdskepp-skjuter", "fire"], ["skott", "shot"]]],
+  ];
+  for (const [lvl, needs, shots] of SHOTS) {
+    test(`screenshots: new obstacles in level ${lvl}`, async ({ browser }) => {
+      test.setTimeout(180000);
+      const start = (lvl - 1) * LEVEL_SECONDS;
+      const has = (ks: string[], n: string) => n.split("|").some((x) => ks.some((k) => k === x || (x.startsWith("+") && k.endsWith(x))));
+      let seed = 1;
+      while (!needs.every((n) => has(Object.keys(simulate(seed, 0, start + 26, start).kinds), n))) seed++;
+      const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true });
+      await ctx.route(FIREBASE, (r) => r.abort());
+      await ctx.routeWebSocket(FIREBASE, (ws) => ws.close());
+      const page = await ctx.newPage();
+      await page.addInitScript((seed) => {
+        let a = seed >>> 0;
+        Math.random = () => {
+          a = (a + 0x6d2b79f5) >>> 0;
+          let t = a;
+          t = Math.imul(t ^ (t >>> 15), t | 1);
+          t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+      }, seed);
+      const errors = trackErrors(page);
+      await startBot(page, 0, `/?level=${lvl}`);
+      // Alla lägen bevakas samtidigt; det som inträffar först fotograferas
+      const pending = new Map(shots.map(([file, cond]) => [cond, file]));
+      let retries = 0;
+      while (pending.size) {
+        const hit = await page.evaluate(
+          (conds) =>
+            new Promise<string | null>((resolve) => {
+              const w = window as any;
+              const timer = setTimeout(() => ((w.__check = null), resolve(null)), 32000);
+              const inView = (o: any, a: number, b: number) => o.x > a && o.x < b;
+              const is: Record<string, (e: any) => boolean> = {
+                drip: (e) => e.obs.some((o: any) => o.n === "drop" && e.clock < o.on - 0.33 && inView(o, 30, 186)),
+                fall: (e) => e.obs.some((o: any) => o.n === "drop" && e.clock > o.on - 0.2 && e.clock < o.on - 0.05),
+                landed: (e) => e.obs.some((o: any) => o.n === "drop" && e.clock > o.on + 0.02 && e.clock < o.on + 0.2),
+                hang: (e) => e.obs.some((o: any) => o.n === "hang" && inView(o, 40, 100)),
+                double: (e) => e.fl?.d !== undefined && e.clock - e.fl.d > 0.08 && e.clock - e.fl.d < 0.2 && e.obs.some((o: any) => o.twin && inView(o, 0, 80)),
+                hole: (e) => e.obs.some((o: any) => o.n === "hole" && inView(o, 50, 110)),
+                light: (e) => e.lights.some((l: any) => e.clock > l.red + 0.5) && e.obs.some((o: any) => (o.n === "car" || o.n === "van") && inView(o, 100, 185)),
+                brake: (e) => e.obs.some((o: any) => o.braked !== undefined && e.clock - o.braked > 0.05 && e.clock - o.braked < 0.25),
+                meteor: (e) => e.obs.some((o: any) => o.k.drop === "sky" && o.on - e.clock > 0.15 && o.on - e.clock < 0.35),
+                meteorLanded: (e) => e.obs.some((o: any) => o.k.drop === "sky" && e.clock > o.on + 0.03 && e.clock < o.on + 0.2),
+                fire: (e) => e.obs.some((o: any) => o.k.shot && e.clock > o.on - 0.12 && e.clock < o.on + 0.04),
+                shot: (e) => e.obs.some((o: any) => o.k.shot && e.clock > o.on && inView(o, 60, 130)),
+              };
+              w.__check = (e: any) => {
+                const c = conds.find((c) => is[c](e));
+                if (!c) return;
+                w.__freeze = true;
+                w.__check = null;
+                clearTimeout(timer);
+                setTimeout(() => resolve(c), 100);
+              };
+            }),
+          [...pending.keys()]
+        );
+        const where = await page.evaluate(() => `t=${(window as any).__api.t().toFixed(1)} läge=${document.getElementById("game")!.dataset.state}`);
+        // Inget inom levelns 30 s (slumpen i sidan glider från fröet): ny omgång
+        // på samma level, högst tre gånger
+        if (hit === null && ++retries <= 3) {
+          await page.reload();
+          await page.evaluate(() => {
+            document.documentElement.style.scrollBehavior = "auto";
+            document.getElementById("game")!.scrollIntoView({ block: "center" });
+          });
+          await page.waitForTimeout(300);
+          await page.locator("#game").tap();
+          continue;
+        }
+        expect(hit, `inträffade inte på ${retries} omgångar: ${[...pending.values()].join(", ")} (${where})`).not.toBeNull();
+        await page.locator("#game").screenshot({ path: path.join(QA_DIR, `screenshot-hinder-${pending.get(hit!)}.png`) });
+        pending.delete(hit!);
+        // Fortsätt: tina upp och starta loopen igen (paus + tryck)
+        await page.evaluate(() => {
+          const w = window as any;
+          w.__freeze = false;
+          Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+          document.dispatchEvent(new Event("visibilitychange"));
+          Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
+        });
+        await page.locator("#game").tap();
+        await expect.poll(() => page.getAttribute("#game", "data-state")).toBe("run");
+      }
+      expect(errors).toEqual([]);
+      await ctx.close();
+    });
+  }
 });
 
 test.describe("Topplista (Firebase mockad)", () => {
@@ -1355,6 +1524,20 @@ test.describe("Topplista (Firebase mockad)", () => {
     // Den incheckade filen ska vara genererad från nuvarande gästlista
     const file = JSON.parse(fs.readFileSync(path.join(QA_DIR, "..", "database.rules.json"), "utf8"));
     expect(file).toEqual(buildRules(["Vilgot"]));
+
+    // Visningsnamn "Familjen <Namn>", genitiv i frågan, game over-rader på högst 23 tecken
+    expect(family("Vilgot")).toBe("Familjen Vilgot");
+    expect(`Posta ${family(genitive("Vilgot"))} rekord?`).toBe("Posta Familjen Vilgots rekord?");
+    expect(family(genitive("Elias"))).toBe("Familjen Elias");
+    expect(scoreLine(1, "Vilgot", 1234)).toBe("1. Familjen Vilgot 1234");
+    expect(scoreLine(1, "Vilgot", 12345)).toBe("1. Fam. Vilgot    12345");
+    expect(scoreLine(10, "Maximiliana", 99999).length).toBeLessThanOrEqual(23);
+
+    // Sms-länkarna i README: en per gäst, genererade av npm run rules från gästlistan
+    expect(smsLinks(["Vilgot", "Åsa"], "https://x.se/k/")).toBe("- Vilgot: https://x.se/k/?g=Vilgot\n- Åsa: https://x.se/k/?g=%C3%85sa");
+    const readme = fs.readFileSync(path.join(QA_DIR, "..", "README.md"), "utf8");
+    expect(withSmsLinks(readme, content.guests, content.site.url), "README:s sms-länkar är inaktuella – kör npm run rules").toBe(readme);
+    expect(readme).toContain(`- Vilgot: ${content.site.url}?g=Vilgot`);
   });
 
   test("Firebase is not loaded at page load – only at first game start", async ({ page }) => {
@@ -1392,7 +1575,7 @@ test.describe("Topplista (Firebase mockad)", () => {
     await fakeBoard(page, {});
     await playToGameOver(page, "/?g=Vilgot");
     await expect(panel(page)).toBeVisible();
-    await expect(panel(page)).toContainText("Nytt rekord! Posta på leaderboarden?");
+    await expect(panel(page)).toContainText("Nytt rekord! Posta Familjen Vilgots rekord?");
     await page.screenshot({ path: path.join(QA_DIR, "screenshot-board-prompt.png") });
     // Spelet startar inte om bakom frågan (Enter till spelytan, inte till Ja-knappen)
     await page.waitForTimeout(800); // förbi omstartsspärren
@@ -1434,7 +1617,7 @@ test.describe("Topplista (Firebase mockad)", () => {
     const score = await playToGameOver(page, "/?g=Vilgot");
     await page.locator("#btn-post-yes").tap();
     await expect.poll(() => writes(page)).toEqual([{ key: "vilgot", name: "Vilgot", score }]);
-    await expect(page.locator("#board-status")).toContainText(`1. Anna`);
+    await expect(page.locator("#board-status")).toContainText(`1. Familjen Anna`);
     await expect(page.locator("#board-status")).toContainText(`Du: plats 2 (${score})`);
     await page.waitForTimeout(300);
     await page.locator(".game-wrap").screenshot({ path: path.join(QA_DIR, "screenshot-board-gameover.png") });
@@ -1446,9 +1629,9 @@ test.describe("Topplista (Firebase mockad)", () => {
       li.map((l) => [l.querySelector(".hs-rank")!.textContent, l.querySelector(".hs-name")!.textContent, l.querySelector(".hs-score")!.textContent, l.classList.contains("hs-me")])
     );
     expect(rows).toEqual([
-      ["1", "Anna", "5000", false],
-      ["2", "Vilgot", String(score), true],
-      ["3", "Bo", "3", false],
+      ["1", "Familjen Anna", "5000", false],
+      ["2", "Familjen Vilgot", String(score), true],
+      ["3", "Familjen Bo", "3", false],
     ]);
     await page.locator("#board").screenshot({ path: path.join(QA_DIR, "screenshot-board-list.png") });
     // Outron är statisk: ingen koppling till topplistan
@@ -1480,7 +1663,9 @@ test.describe("Topplista (Firebase mockad)", () => {
       await page.addInitScript(() => localStorage.setItem("vilgots-kalas-autopost:emma", "1"));
       await playToGameOver(page, url);
       await expect(panel(page), url).toBeHidden();
-      await expect(page.locator("#board-status"), url).toContainText("Öppna din egen länk");
+      await expect(page.locator("#board-status"), url).toContainText(NO_LINK);
+      await expect(page.locator("#board-list"), url).toContainText(NO_LINK);
+      if (url === "/") await page.locator("#game").screenshot({ path: path.join(QA_DIR, "screenshot-board-nolink.png") });
       await page.waitForTimeout(500);
       expect(await writes(page), url).toEqual([]);
     }
@@ -1497,8 +1682,8 @@ test.describe("Topplista (Firebase mockad)", () => {
     await expect(page.locator("#board-list")).toHaveAttribute("data-board", "ok");
     await page.locator("#board-toggle").click();
     const names = await page.$$eval("#board-list .hs-row .hs-name", (n) => n.map((x) => x.textContent));
-    expect(names.slice(0, 10)).toEqual(Array.from({ length: 10 }, (_, i) => `Gäst ${i}`));
-    expect(names.slice(10)).toEqual(["…", "Vilgot"]);
+    expect(names.slice(0, 10)).toEqual(Array.from({ length: 10 }, (_, i) => `Familjen Gäst ${i}`));
+    expect(names.slice(10)).toEqual(["…", "Familjen Vilgot"]);
     await expect(page.locator("#board-list .hs-me .hs-rank")).toHaveText("12");
 
     // Någon annan tar förstaplatsen
@@ -1508,7 +1693,7 @@ test.describe("Topplista (Firebase mockad)", () => {
     });
     await expect(page.locator(".levelup")).toHaveText("NEW HIGH SCORE!");
     expect(await page.evaluate(() => (window as any).__sfx)).toContain("chest");
-    await expect(page.locator("#board-list .hs-row").first().locator(".hs-name")).toHaveText("Gäst 5");
+    await expect(page.locator("#board-list .hs-row").first().locator(".hs-name")).toHaveText("Familjen Gäst 5");
     // Ingen fanfar när någon längre ner förbättrar sig
     await page.waitForTimeout(2500);
     await page.evaluate(() => {
@@ -1576,7 +1761,7 @@ test.describe("Topplista (Firebase mockad)", () => {
 
     await toggle.click();
     await expect(page.locator("#board-list")).toBeVisible();
-    await expect(page.locator("#board-list .hs-me .hs-name")).toHaveText("Vilgot");
+    await expect(page.locator("#board-list .hs-me .hs-name")).toHaveText("Familjen Vilgot");
     expect(await page.evaluate(() => localStorage.getItem("vilgots-kalas-board-open"))).toBe("1");
     await page.locator("#board").screenshot({ path: path.join(QA_DIR, "screenshot-board-open.png") });
 

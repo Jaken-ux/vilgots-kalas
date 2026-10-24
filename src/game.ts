@@ -2,81 +2,31 @@
 // Spelet räknar i "spelpixlar" (W×H). Canvasen får bredden W·k enhetspixlar
 // (k = heltal) och ritar med ctx.scale(k), så varje spelpixel blir exakt k×k
 // skärmpixlar – skarpt även för text, utan uppskalning av en liten bild.
-// Miljöerna (gräs, grotta, stad, rymd) och deras hinder finns i levels.ts.
+// Reglerna (fart, hopp, hinder, krockar, utplacering) finns i engine.ts, och
+// miljöerna (gräs, grotta, stad, rymd) i levels.ts. Här: ritning, tryck, loop.
 import { PALETTE, SPRITES } from "./sprites";
-import { ENVS, GROUND, DIVE_TOP, DIVE_LOW, type Kind, type Palette } from "./levels";
+import { ENVS, GROUND, type Palette } from "./levels";
+import { createEngine, distAt, envAt, LEVEL_SECONDS, LIVES, RX, W, H, type Engine, type EngineEvent } from "./engine";
 
-export type { Kind } from "./levels";
-export type GameSound = "jump" | "ouch" | "gameover" | "coin" | "level";
+export type GameSound = "jump" | "double" | "ouch" | "gameover" | "coin" | "level";
 type State = "idle" | "run" | "pause" | "over";
 
-const W = 192;
-const H = 96;
-const RX = 24; // gubbens x
-const LIVES = 3;
 const BEST_KEY = "vilgots-kalas-best"; // per webbläsare, inte per gäst
-const LEVEL_SECONDS = 30; // ny level var 30:e sekund
 const FADE = 1; // sekunder för övergången till nästa miljö
-
-// Fart i spelpixlar/s efter t sekunders spel, utan tak. Över ~1 193 px/s syns de
-// höga hindren för sent för att hinna hoppa (se jumpWindow och SIGHT); för en
-// spelare med 60 bildrutor/s redan vid ~1 060 px/s, eftersom hindret hinner flytta
-// sig en bildruta innan det syns. Det nås efter ~177 s, så spelet tar alltid slut,
-// även för en perfekt spelare, efter 3–4 minuter. 30 s: 150, 60 s: 270, 90 s: 430.
-export const vAt = (t: number) => 70 + 2 * t + 0.022 * t * t;
-// Hinder kommer in i högerkanten: så långt bort (d) syns de först
-export const SIGHT = W - RX - 6;
-
-// Hopp: utgångsfart och gravitation ger 0,58 s i luften och 37 px topphöjd
-const V0 = 260;
-const GRAV = 900;
-const AIR = (2 * V0) / GRAV;
-
-// Grästypen, för testsviten (alla miljöer har samma höjdklasser)
-export const KINDS = ENVS[0].kinds;
-type Name = keyof typeof KINDS;
-// Blandningen efter uppvärmningen: [typ, kumulativ sannolikhet]
-const MIX = "bush block big pillar bird dive swoop".split(" ") as Name[];
-const ODDS = [0.2, 0.35, 0.55, 0.7, 0.8, 0.9, 1];
 
 // Gubben (8×10): två springsteg och ett hopp. Samma tecken som i sprites.ts.
 const HEAD = ["..DDDD..", ".DDDDDD.", ".ppppkp.", ".pppppp.", "..pppp..", ".gggggg.", "pggggggp", ".GGGGGG."];
 const RUN_A = [...HEAD, ".BB..BB.", "kk....kk"];
 const RUN_B = [...HEAD, "..BBBB..", "..kkkk.."];
 const JUMP = [...HEAD, ".BBBBBB.", ".k....k."];
-
-// Avstånd d = hindrets x - (RX + 6): vid d < 0 överlappar hindret gubben i sidled,
-// under w + 4 px. Krocken undviks om gubben då är minst c px upp.
-const clearance = (k: Kind) => GROUND - k.y - 1;
-
-// Hoppfönster [tidigast, senast] uttryckt som d vid avstampet, vid fart v.
-// För "stand"-hinder: gubben ska stå på marken när d = 0 och kan hoppa igen
-// först när d = -(w + 4).
-export function jumpWindow(k: Kind, v: number): [number, number] {
-  if (k.stand) return [0, -(k.w + 4)];
-  const s = Math.sqrt(V0 * V0 - 2 * GRAV * clearance(k));
-  return [(v * (V0 - s)) / GRAV, (v * (V0 + s)) / GRAV - (k.w + 4)];
-}
-
-// Minsta avstånd mellan två hinders vänsterkanter så att b alltid går att klara
-// efter a: a hoppas så tidigt som möjligt, och vid landningen får b inte ha
-// passerat sitt senaste avstamp.
-export function minGap(a: Kind, b: Kind, v: number): number {
-  return (a.stand ? 0 : v * AIR) - jumpWindow(a, v)[1] + jumpWindow(b, v)[0];
-}
-
-// Slumpat avstånd (r = 0..1) – aldrig under minGap plus marginal för reaktion.
-// dens (0..1] gör hindren tätare: krymper den slumpade delen, aldrig minimumet.
-// Par: två låga hinder där andra hoppet görs direkt vid landning.
-export function nextGap(a: Kind, b: Kind, v: number, r: number, pair: boolean, dens = 1): number {
-  const min = minGap(a, b, v);
-  if (pair) return Math.max(min + 4, v * AIR + 4);
-  return Math.max(min + v * 0.3 * dens + 6, v * (AIR + (0.15 + 0.85 * r) * dens));
-}
-
-// Täthet efter speltid: tätare med tiden, och 25 % tätare per varv genom miljöerna
-export const density = (t: number) =>
-  Math.max(0.35, 1 - t / 240) * 0.75 ** Math.floor(t / (LEVEL_SECONDS * ENVS.length));
+// Rymdskeppet som skjuter
+const SHIP = ["....cccc....", "...cbbbbc...", ".kkkkkkkkkk.", "kSSySSySSySk", ".kkkkkkkkkk.", "...r....r..."];
+// Dubbelhoppets puff: tre rutor under 0,4 s
+const PUFF = [
+  ["........", "...ww...", "..wccw..", "...ww..."],
+  ["..w..w..", ".wc..cw.", "w......w", ".wc..cw."],
+  [".c....c.", "c......c", "........", ".c....c."],
+];
 
 type Img = HTMLCanvasElement;
 function sprite(rows: string[]): Img {
@@ -105,14 +55,6 @@ const mix = (a: string, b: string, f: number) =>
         .padStart(2, "0");
     })
     .join("");
-
-interface Obstacle {
-  x: number;
-  y: number;
-  k: Kind;
-  a: Img;
-  b?: Img; // andra animationsrutan (flygarna)
-}
 
 // Bakgrundsdekor: fyra platser som rullar runt. En plats byter till den nya
 // miljöns dekor först när den rullat ut till vänster.
@@ -144,55 +86,46 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, hooks: G
   const status = document.getElementById("game-status");
   const ctx = canvas.getContext("2d")!;
   const img = {
-    runA: sprite(RUN_A), runB: sprite(RUN_B), jump: sprite(JUMP),
+    runA: sprite(RUN_A), runB: sprite(RUN_B), jump: sprite(JUMP), ship: sprite(SHIP),
     heart: sprite(SPRITES.heart), empty: sprite(SPRITES["heart-empty"]),
   };
+  const puffs = PUFF.map(sprite);
   const look = new Map(ENVS.flatMap((e) => Object.values(e.kinds)).map((k) => [k, k.f.map(sprite)]));
+  const fallImg = new Map(ENVS.flatMap((e) => Object.values(e.kinds)).filter((k) => k.fall).map((k) => [k, sprite(k.fall!)]));
   const decorImg = ENVS.map((e) => sprite(e.decor.f));
 
   // Dolt ?level=N (även decimaler, t.ex. 1.9): börja på level N med rätt fart.
   // Övningsläge: varken rekord eller topplista påverkas.
   const startLevel = Math.max(1, Number(new URLSearchParams(location.search).get("level")) || 1);
   const practice = startLevel !== 1;
+  const startClock = (startLevel - 1) * LEVEL_SECONDS;
 
   let state: State = "idle";
   let k = 1;
-  let y = 0; // höjd över marken
-  let vy = 0;
-  let speed = vAt(0);
-  let dist = 0;
-  let clock = 0; // speltid i sekunder (står still i paus)
-  let level = 1;
-  let env = 0; // nuvarande miljö (index i ENVS)
-  let fromPal: Palette = ENVS[0].pal; // palett vid senaste miljöbytet
+  let eng: Engine = createEngine({ start: startClock });
+  let env = envAt(startClock); // nuvarande miljö
+  let fromPal: Palette = env.pal; // palett vid senaste miljöbytet
   let switchAt = -FADE; // när miljöbytet började
   let levelUpAt = -9; // när "LEVEL UP!" ska blinka
-  let gap = 0; // sträcka kvar till nästa hinder
-  let next: Name = "bush"; // nästa hinder som ska komma in
-  let lives = LIVES;
-  let inv = 0; // skyddstid efter en krock
-  let obs: Obstacle[] = [];
-  let decor: Decor[] = [0, 1, 2, 3].map((i) => ({ x: i * 64, env: 0 }));
+  let decor: Decor[] = [0, 1, 2, 3].map((i) => ({ x: i * 64, env: ENVS.indexOf(env) }));
   let raf = 0;
   let last = 0;
   let lock = 0; // ingen omstart direkt efter game over (ett hopptryck ska inte starta om)
-  let jumps = 0;
   let down: { x: number; y: number; t: number } | null = null;
   let info: InfoLine[] = []; // topplistan på game over-skärmen
   let held = false; // en fråga visas ovanpå spelet: ingen omstart
 
-  const score = () => Math.floor(dist / 10);
-  const levelAt = (t: number) => Math.floor(t / LEVEL_SECONDS) + 1;
-  const envOf = (lvl: number) => (lvl - 1) % ENVS.length;
+  const score = () => Math.floor(eng.dist / 10);
 
   // Läge och siffror som data-attribut: för CSS (touch-action) och testerna
   const sync = () => {
     el.dataset.state = state;
-    el.dataset.lives = String(lives);
+    el.dataset.lives = String(eng.lives);
     el.dataset.score = String(score());
-    el.dataset.jumps = String(jumps);
-    el.dataset.level = String(level);
-    el.dataset.env = ENVS[env].name;
+    el.dataset.jumps = String(eng.jumps);
+    el.dataset.doubles = String(eng.doubles);
+    el.dataset.level = String(eng.level);
+    el.dataset.env = env.name;
     el.classList.toggle("playing", state === "run");
   };
   const say = (t: string) => status && (status.textContent = t);
@@ -216,18 +149,23 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, hooks: G
     ctx.fillStyle = color;
     ctx.fillText(t, x, ty);
   };
+  const box = (c: string, x: number, y: number, w: number, h: number) => {
+    ctx.fillStyle = PALETTE[c] ?? c;
+    ctx.fillRect(Math.round(x), Math.round(y), w, h);
+  };
 
   // Paletten just nu: tonar från förra miljön till den nya under FADE sekunder
   const palette = (): Palette => {
-    const f = Math.min(1, Math.max(0, (clock - switchAt) / FADE));
-    const to = ENVS[env].pal;
+    const f = Math.min(1, Math.max(0, (eng.clock - switchAt) / FADE));
     const p = {} as Palette;
-    for (const key of Object.keys(to) as (keyof Palette)[]) p[key] = mix(fromPal[key], to[key], f);
+    for (const key of Object.keys(env.pal) as (keyof Palette)[]) p[key] = mix(fromPal[key], env.pal[key], f);
     return p;
   };
 
   function draw() {
     const pal = palette();
+    const t = eng.clock;
+    const dist = eng.dist;
     ctx.setTransform(k, 0, 0, k, 0, 0);
     ctx.imageSmoothingEnabled = false;
     ctx.font = "8px 'Press Start 2P', monospace";
@@ -238,6 +176,17 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, hooks: G
     // Dekor (moln, droppstenar, hus, stjärnor) – varje plats i sin egen miljö
     decor.forEach((d, i) => ctx.drawImage(decorImg[d.env], Math.round(d.x), ENVS[d.env].decor.y[i]));
 
+    // Trafikljuset vid korsningen längre fram: grönt, sedan rött ~1 s före bilraden
+    for (const l of eng.lights) {
+      if (t < l.on) continue;
+      const red = t >= l.red;
+      box("S", W - 11, 30, 1, GROUND - 30);
+      box("k", W - 13, 16, 5, 14);
+      box(red ? "r" : "Q", W - 12, 17, 3, 3);
+      box("Q", W - 12, 21, 3, 3);
+      box(red ? "Q" : "l", W - 12, 25, 3, 3);
+    }
+
     ctx.fillStyle = pal.fill;
     ctx.fillRect(0, GROUND, W, H - GROUND);
     ctx.fillStyle = pal.top;
@@ -245,28 +194,68 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, hooks: G
     ctx.fillStyle = pal.edge;
     ctx.fillRect(0, GROUND + 3, W, 1);
     ctx.fillStyle = pal.dot;
-    const [dw, dh] = ENVS[env].dot;
+    const [dw, dh] = env.dot;
     for (let i = 0; i < 9; i++) {
       ctx.fillRect(Math.round((((i * 23 - dist) % W) + W) % W), GROUND + 6 + ((i * 5) % 8), dw, dh);
     }
 
-    for (const o of obs) {
-      // Dykaren slår med vingarna 2,4 gånger så tätt som den raka flygaren
-      const flap = Math.floor(dist / (o.k.dive === undefined ? 12 : 5)) % 2;
-      ctx.drawImage(o.b && flap ? o.b : o.a, Math.round(o.x), Math.round(o.y));
+    for (const o of eng.obs) {
+      const x = Math.round(o.x);
+      if (x > W + 40) continue;
+      const kd = o.k;
+      if (kd.shot) {
+        // Skeppet flyger in, siktar (blinkar) och skjuter; skottet är hindret
+        const u = t - o.seen;
+        if (u >= 0 && t < o.on + 0.5) {
+          const sx = W - 22 * Math.min(1, u / 0.22);
+          const sy = kd.y - 2 - Math.max(0, t - o.on) * 120;
+          ctx.drawImage(img.ship, Math.round(sx), Math.round(sy));
+          if (t < o.on && Math.floor(u * 12) % 2) box("y", sx - 2, kd.y + 1, 2, 1);
+        }
+        if (t < o.on) continue;
+      }
+      if (kd.drop && t < o.on) {
+        const f = fallImg.get(kd)!;
+        const u = o.on - t;
+        if (kd.drop === "roof") {
+          // Stalaktiten hänger i taket och droppar ~1 s, lossnar och faller 0,3 s
+          const p = Math.max(0, 1 - u / 0.3);
+          ctx.drawImage(f, x, Math.round((GROUND - f.height) * p * p));
+          if (!p && u < 1.3) for (let i = 0; i < 3; i++) box("b", x + 3, 17 + ((t * 80 + i * 21) % (GROUND - 17)), 2, 2);
+        } else if (u < 1) {
+          // Meteoriten: skugga som växer ~1 s före nedslaget, stenen brant uppifrån
+          const w = Math.round(2 + (kd.w - 2) * (1 - u));
+          box("S", x + (kd.w - w) / 2, GROUND, w, 2);
+          if (u < 0.6) ctx.drawImage(f, Math.round(x + 40 * u), Math.round((GROUND - 6) * (1 - u / 0.6)));
+        }
+        continue;
+      }
+      ctx.drawImage(look.get(kd)![o.k.f.length > 1 && Math.floor(dist / (kd.dive === undefined ? 12 : 5)) % 2 ? 1 : 0], x, Math.round(o.y));
+      // Nedslaget: dammpuff
+      if (kd.drop && t - o.on < 0.3) ctx.drawImage(puffs[Math.floor((t - o.on) * 10)], x, GROUND - 4);
+      // Bilen som bromsar: bromsljus och rökpuff bakom
+      if (o.braked !== undefined && t - o.braked < 0.6) {
+        box("r", x + kd.w - 1, o.y + 4, 2, 2);
+        if (Math.floor((t - o.braked) * 10) % 2) box("c", x + kd.w + 1, GROUND - 3, 3, 2);
+      }
     }
 
     // Gubben blinkar under skyddstiden; springstegen följer sträckan (fortare i hög fart)
-    if (!(inv > 0 && Math.floor(inv * 10) % 2)) {
-      const g = y > 0 ? img.jump : state === "run" && Math.floor(dist / 6) % 2 ? img.runA : img.runB;
-      ctx.drawImage(g, RX, Math.round(GROUND - 10 - y));
+    if (!(eng.inv > 0 && Math.floor(eng.inv * 10) % 2)) {
+      const g = eng.y > 0 ? img.jump : state === "run" && Math.floor(dist / 6) % 2 ? img.runA : img.runB;
+      ctx.drawImage(g, RX, Math.round(GROUND - 10 - eng.y));
+    }
+    // Dubbelhoppets puff stannar där den blev till (rullar med marken)
+    for (const p of eng.puffs) {
+      const x = p.x - (distAt(t) - distAt(p.t));
+      ctx.drawImage(puffs[Math.min(2, Math.floor(((t - p.t) / 0.4) * 3))], Math.round(x), Math.round(p.y));
     }
 
-    for (let i = 0; i < LIVES; i++) ctx.drawImage(i < lives ? img.heart : img.empty, 4 + i * 11, 4);
+    for (let i = 0; i < LIVES; i++) ctx.drawImage(i < eng.lives ? img.heart : img.empty, 4 + i * 11, 4);
     text(String(score()).padStart(5, "0"), W - 4, 5, PALETTE.y, "right");
-    if (state !== "idle") text(`LEVEL ${level}`, W / 2, 5, PALETTE.c);
+    if (state !== "idle") text(`LEVEL ${eng.level}`, W / 2, 5, PALETTE.c);
     // "LEVEL UP!" blinkar i 1,5 s vid byte
-    if (state === "run" && clock - levelUpAt < 1.5 && Math.floor((clock - levelUpAt) * 6) % 2 === 0) {
+    if (state === "run" && t - levelUpAt < 1.5 && Math.floor((t - levelUpAt) * 6) % 2 === 0) {
       text("LEVEL UP!", W / 2, 30, PALETTE.y);
     }
 
@@ -279,7 +268,7 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, hooks: G
       // Med topplista: tätare rader, max 5 under poängen
       text("GAME OVER", W / 2, 14, PALETTE.r);
       text(`Poäng: ${score()}`, W / 2, 24, PALETTE.y);
-      info.slice(0, 5).forEach(([t, c], i) => text(t, W / 2, 35 + i * 9, c));
+      info.slice(0, 5).forEach(([s, c], i) => text(s, W / 2, 35 + i * 9, c));
       text("Tryck = spela igen", W / 2, 84, PALETTE.w);
     } else if (state === "over") {
       text("GAME OVER", W / 2, 22, PALETTE.r);
@@ -289,84 +278,25 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, hooks: G
     }
   }
 
-  // Vilket hinder som helst får komma – avståndet till nästa räknas alltid ut så
-  // att det går att klara (nextGap). Fåglar och de svåra hindren kommer efter en stund.
-  const pick = (): Name => {
-    const r = Math.random();
-    if (dist < 800) return r < 0.4 ? "bush" : r < 0.7 ? "block" : "big";
-    return MIX[ODDS.findIndex((p) => r < p)];
-  };
-
-  const spawn = () => {
-    const kinds = ENVS[env].kinds;
-    const k = kinds[next];
-    const [a, b] = look.get(k)!;
-    obs.push({ x: W, y: k.y, k, a, b });
-    // Fart när nästa hinder når gubben (om 3 s, högre än nu) – ger aldrig för kort avstånd
-    const v = vAt(clock + 3);
-    const pair = !!k.pair && Math.random() < 0.2 && !obs[obs.length - 2]?.k.pair;
-    next = pair ? (Math.random() < 0.5 ? "bush" : "block") : pick();
-    gap = nextGap(k, kinds[next], v, Math.random(), pair, density(clock));
-  };
-
-  const hit = (o: Obstacle) => {
-    const top = GROUND - 10 - y;
-    return RX + 7 > o.x + 1 && RX + 1 < o.x + o.k.w - 1 && top + 10 > o.y + 1 && top + 1 < o.y + o.k.h - 1;
-  };
-
   // Byt till levelns miljö: tona från paletten som syns just nu
-  const setLevel = (lvl: number, fade: boolean) => {
-    const e = envOf(lvl);
-    if (e !== env) {
-      fromPal = fade ? palette() : ENVS[e].pal;
-      switchAt = fade ? clock : clock - FADE;
-      env = e;
+  const setEnv = (fade: boolean) => {
+    const next = envAt(eng.clock);
+    if (next !== env) {
+      fromPal = fade ? palette() : next.pal;
+      switchAt = fade ? eng.clock : eng.clock - FADE;
+      env = next;
     }
-    level = lvl;
   };
 
-  function step(dt: number) {
-    const before = score();
-    clock += dt;
-    speed = vAt(clock);
-    dist += speed * dt;
-    if (levelAt(clock) !== level) {
-      setLevel(levelAt(clock), true);
-      levelUpAt = clock;
-      play("level");
+  // Motorns händelser: ljud, levelbyte och game over
+  const onEvent = (ev: EngineEvent) => {
+    if (ev === "over") return gameOver();
+    if (ev === "level") {
+      setEnv(true);
+      levelUpAt = eng.clock;
     }
-    if (y > 0 || vy > 0) {
-      vy -= GRAV * dt;
-      y = Math.max(0, y + vy * dt);
-      if (y === 0) vy = 0;
-    }
-    for (const o of obs) {
-      o.x -= speed * dt;
-      // Dykaren: från DIVE_TOP ner till huvudhöjd, klar vid d = dive
-      if (o.k.dive !== undefined) {
-        const f = Math.min(1, Math.max(0, (o.x - RX - 6 - o.k.dive) / 60));
-        o.y = DIVE_LOW - (DIVE_LOW - DIVE_TOP) * f;
-      }
-    }
-    obs = obs.filter((o) => o.x > -o.k.w);
-    for (const d of decor) {
-      d.x -= speed * dt * ENVS[d.env].decor.par;
-      if (d.x < -32) {
-        d.x += DECOR_SPAN;
-        d.env = env;
-      }
-    }
-    gap -= speed * dt;
-    if (gap <= 0) spawn();
-    if (inv > 0) inv -= dt;
-    else if (obs.some(hit)) {
-      lives--;
-      if (!lives) return gameOver();
-      inv = 1.2;
-      play("ouch");
-    }
-    if (Math.floor(score() / 100) > Math.floor(before / 100)) play("coin");
-  }
+    play(ev);
+  };
 
   // Tidssteg från requestAnimationFrame, 0–50 ms: max så att en paus inte blir ett
   // hopp framåt, min 0 eftersom första bildrutans tidsstämpel kan ligga före
@@ -375,8 +305,15 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, hooks: G
   // två bildrutor utan att krocken märks.
   function loop(now: number) {
     const dt = Math.max(0, Math.min(0.05, (now - last) / 1000));
-    const n = Math.max(1, Math.ceil((speed * dt) / 4));
-    for (let i = 0; i < n && state === "run"; i++) step(dt / n);
+    const n = Math.max(1, Math.ceil((eng.speed * dt) / 4));
+    for (let i = 0; i < n && state === "run"; i++) eng.step(dt / n);
+    for (const d of decor) {
+      d.x -= eng.speed * dt * ENVS[d.env].decor.par;
+      if (d.x < -32) {
+        d.x += DECOR_SPAN;
+        d.env = ENVS.indexOf(env);
+      }
+    }
     last = now;
     draw();
     sync();
@@ -392,20 +329,13 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, hooks: G
   };
 
   const start = () => {
-    y = vy = dist = 0;
-    clock = (startLevel - 1) * LEVEL_SECONDS;
-    speed = vAt(clock);
+    eng = createEngine({ start: startClock, emit: (ev) => onEvent(ev) });
     levelUpAt = -9;
-    setLevel(levelAt(clock), false);
-    decor = decor.map((d) => ({ ...d, env }));
-    gap = 60;
-    next = "bush";
-    lives = LIVES;
-    inv = 0;
-    obs = [];
+    setEnv(false);
+    decor = decor.map((d) => ({ ...d, env: ENVS.indexOf(env) }));
     info = [];
     hooks.onStart();
-    say("Tryck för att hoppa.");
+    say("Tryck för att hoppa – tryck igen i luften för dubbelhopp.");
     run();
   };
 
@@ -434,16 +364,12 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, hooks: G
     }
     if (!practice) hooks.onOver(s, best);
     play("gameover");
-    say(`Game over. Poäng ${s}. Level ${level}. Tryck för att spela igen.`);
+    say(`Game over. Poäng ${s}. Level ${eng.level}. Tryck för att spela igen.`);
   }
 
+  // Hopp från marken, dubbelhopp i luften (motorn bestämmer vilket)
   const jump = () => {
-    if (y > 0) return;
-    vy = V0;
-    y = 0.01;
-    jumps++;
-    sync();
-    play("jump");
+    if (eng.press()) sync();
   };
 
   // Ett tryck utanför spelet (start, fortsätt, spela igen)
@@ -482,13 +408,14 @@ export function initGame(el: HTMLElement, play: (s: GameSound) => void, hooks: G
   document.addEventListener("visibilitychange", () => document.hidden && pause());
 
   // Testkrok: finns window.__gameHook (sätts bara av testsviten) får den läsa
-  // gubbens höjd, hindren och farten. Hopp görs ändå via riktiga tryck.
+  // motorn för pågående spel (höjd, hinder, fart, tid). Hopp görs ändå via
+  // riktiga tryck.
   (window as unknown as { __gameHook?: (api: object) => void }).__gameHook?.({
-    y: () => y,
-    obs: () => obs,
-    v: () => speed,
-    t: () => clock,
-    win: jumpWindow,
+    engine: () => eng,
+    y: () => eng.y,
+    obs: () => eng.obs,
+    v: () => eng.speed,
+    t: () => eng.clock,
   });
 
   window.addEventListener("resize", resize);
