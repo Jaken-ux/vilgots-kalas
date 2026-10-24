@@ -1649,7 +1649,7 @@ test.describe("Topplista (Firebase mockad)", () => {
     expect(r[".write"]).not.toContain("emma");
     // Den incheckade filen ska vara genererad från nuvarande gästlista
     const file = JSON.parse(fs.readFileSync(path.join(QA_DIR, "..", "database.rules.json"), "utf8"));
-    expect(file).toEqual(buildRules(["Vilgot"]));
+    expect(file).toEqual(buildRules(content.guests));
 
     // Visningsnamn "Familjen <Namn>", genitiv i frågan, game over-rader på högst 23 tecken
     expect(family("Vilgot")).toBe("Familjen Vilgot");

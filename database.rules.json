@@ -5,7 +5,7 @@
     "scores": {
       ".read": true,
       "$name": {
-        ".write": "($name === 'vilgot') && newData.exists()",
+        ".write": "($name === 'vilgot' || $name === 'vilhelm' || $name === 'eric' || $name === 'frank' || $name === 'sam' || $name === 'john' || $name === 'cedrik') && newData.exists()",
         ".validate": "newData.hasChildren(['name', 'score', 'updatedAt']) && newData.child('updatedAt').val() === now",
         "name": {
           ".validate": "newData.isString() && newData.val().toLowerCase() === $name"

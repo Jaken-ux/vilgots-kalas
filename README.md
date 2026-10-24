@@ -191,6 +191,12 @@ En färdig länk per namn i `guests` (`src/content.ts`). Skicka varje gäst sin 
 
 <!-- sms-länkar:start (skrivs av npm run rules – ändra inte för hand) -->
 - Vilgot: https://jaken-ux.github.io/vilgots-kalas/?g=Vilgot
+- Vilhelm: https://jaken-ux.github.io/vilgots-kalas/?g=Vilhelm
+- Eric: https://jaken-ux.github.io/vilgots-kalas/?g=Eric
+- Frank: https://jaken-ux.github.io/vilgots-kalas/?g=Frank
+- Sam: https://jaken-ux.github.io/vilgots-kalas/?g=Sam
+- John: https://jaken-ux.github.io/vilgots-kalas/?g=John
+- Cedrik: https://jaken-ux.github.io/vilgots-kalas/?g=Cedrik
 <!-- sms-länkar:end -->
 
 ## Sparat OSA-svar

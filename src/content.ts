@@ -3,7 +3,7 @@ export const content = {
   // Gäster som kan hamna på minispelets topplista (via sin ?g-länk). Ändras
   // listan: kör `npm run rules` (nya regler + sms-länkarna i README) och
   // klistra in de nya reglerna i Firebase (README).
-  guests: ["Vilgot"],
+  guests: ["Vilgot", "Vilhelm", "Eric", "Frank", "Sam", "John", "Cedrik"],
   party: {
     kind: "Gamingkalas",
     dateISO: "2026-11-20",
