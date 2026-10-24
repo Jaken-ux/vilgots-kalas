@@ -309,7 +309,7 @@ function initAudioUnlock() {
 
 // 8-bitarsljud syntetiseras direkt med Web Audio (fyrkant- och triangelvågor
 // med korta envelopes) – inga ljudfiler att ladda.
-type SoundName = "blip" | "coin" | "dig" | "chest" | "ouch" | "gameover" | "levelup" | "equip" | "jump" | "double" | "level";
+type SoundName = "blip" | "coin" | "dig" | "chest" | "ouch" | "gameover" | "levelup" | "equip" | "jump" | "double" | "level" | "crunch";
 const MASTER_VOLUME = 0.22;
 
 interface Note {
@@ -416,6 +416,12 @@ const SYNTHS: Record<SoundName, (ctx: AudioContext, out: AudioNode, t0: number, 
   jump: (c, o, t, r) => note(c, o, t, r, { f: 300, to: 700, at: 0, dur: 0.12, vol: 0.3 }),
   // Dubbelhopp: samma glid, en oktav högre och kortare
   double: (c, o, t, r) => note(c, o, t, r, { f: 600, to: 1400, at: 0, dur: 0.09, vol: 0.25 }),
+  // Tugga på pizzan: två krispiga brusknaster och en kort, dov tugga
+  crunch: (c, o, t, r) => {
+    crackle(c, o, t, 0, 0.04, 2600 * r);
+    crackle(c, o, t, 0.05, 0.06, 1600 * r);
+    note(c, o, t, r, { f: 180, to: 90, at: 0, dur: 0.08, type: "triangle", vol: 0.6 });
+  },
   // Ny level i minispelet: kort pling, tre toner uppåt
   level: (c, o, t, r) => arp([784, 1047, 1568], 0.06, 0.08, 0.3).forEach((n) => note(c, o, t, r, n)),
 };
@@ -677,6 +683,63 @@ function initChest() {
     } else {
       playSound("blip", { rate: 0.75 });
     }
+  });
+}
+
+// ===== PIZZA (Vad händer) =====
+// Tuggor i spritens pixelkoordinater (cx, cy, r): spetsen, mitten, nästan allt
+// utom kanten. En tugga är hela svarta pixlar i en SVG-mask: pixlarna raderas,
+// inget ritas ovanpå (fungerar mot alla bakgrunder).
+const BITES: [number, number, number][][] = [
+  [[8, 1.5, 3.8]],
+  [[5.5, 6.5, 3], [10.5, 6.5, 3], [8, 5, 3.2]],
+  [[4, 10, 3], [12, 10, 3], [8, 9.5, 3.6], [8, 6, 3]],
+];
+const PIZZA_LABELS = ["Ta en tugga!", "Mums!", "En till?", "Bara kanten kvar…"];
+
+function initPizza() {
+  const btn = $("#btn-pizza");
+  const label = $("#pizza-label");
+  const svg = btn?.querySelector("svg");
+  if (!btn || !label || !svg) return;
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (tag: string, attrs: Record<string, string | number>) => {
+    const e = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
+    return e;
+  };
+  // Masken läggs till med JS; utan JS syns hela pizzan
+  const mask = el("mask", { id: "bite-mask", maskUnits: "userSpaceOnUse", x: 0, y: 0, width: 16, height: 16 });
+  const bites = el("g", { fill: "black" });
+  mask.append(el("rect", { width: 16, height: 16, fill: "white" }), bites);
+  const slice = el("g", { mask: "url(#bite-mask)" });
+  slice.append(...Array.from(svg.childNodes));
+  svg.append(el("defs", {}), slice);
+  svg.firstElementChild!.append(mask);
+  let n = 0;
+
+  btn.addEventListener("click", () => {
+    if (n < BITES.length) {
+      // Pixlar inom tuggan, med tandad kant (varannan pixel i ytterkanten står kvar)
+      for (const [cx, cy, r] of BITES[n]) {
+        for (let y = 0; y < 16; y++) {
+          for (let x = 0; x < 16; x++) {
+            const d = Math.hypot(x + 0.5 - cx, y + 0.5 - cy);
+            if (d < r - 0.8 || (d < r && (x + y) % 2)) bites.append(el("rect", { x, y, width: 1, height: 1 }));
+          }
+        }
+      }
+      n++;
+      playSound("crunch");
+    } else {
+      // Fjärde trycket: ny bit
+      bites.replaceChildren();
+      n = 0;
+      playSound("blip");
+    }
+    if (!reducedMotion) gsap.fromTo(btn, { y: 0 }, { keyframes: { y: [-6, 0] }, duration: 0.16, ease: "steps(2)" });
+    label.textContent = PIZZA_LABELS[n];
+    btn.dataset.bites = String(n);
   });
 }
 
@@ -1018,6 +1081,7 @@ function init() {
     ["hero", initHero],
     ["dig", initDig],
     ["chest", initChest],
+    ["pizza", initPizza],
     ["hearts", initHearts],
     ["bonus", initBonus],
     ["mute", initMuteToggle],

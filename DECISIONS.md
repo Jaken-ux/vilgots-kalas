@@ -2,6 +2,17 @@
 
 Nyast överst. Projektet är en kopia av Livias kalas. Posterna före 2026-10-23 kommer därifrån och gäller den ärvda koden.
 
+## 2026-10-24 — Ny tid 17:00–19:30, pizza i programmet
+Tiden ändrad i `content.ts` och syns på det enda stället där den används (`#when-time`). Nedräkningen räknar dagar från datumet och påverkas inte. OSA-texten nämner ingen tid.
+
+**Pizzan är en egen beat i Vad händer**, efter Gaming och före Snacks (antagande om ordningen). Tugg-interaktionen kommer från Livias kalas, i pixelstil:
+- Tuggorna är hela svarta pixlar i en SVG-mask över pixelbiten, med tandad kant. Inget ritas ovanpå i bakgrundsfärg.
+- Masken läggs till med JS. Utan JS syns hela biten, och texten "Ta en tugga!" döljs.
+- Tre tuggor, och det fjärde trycket ger en ny bit. Ljudet är ett 8-bitars crunch (två brusknaster och en dov ton, `crunch` i `SYNTHS`), och en ny bit ger `blip`.
+- Tuggornas lägen justerades efter granskning av skärmdumpar. Först nådde tredje tuggan in i kanten och andra lämnade lösa pixlar. Testet kontrollerar nu att kanten (rad 13–15) står kvar.
+
+Verifiering, lätt nivå: bygg, de berörda testerna (innehåll, utan JS, ljud, pizza, bredder) och skärmdumpar av pizzans fyra lägen. Commit: "Update time, add pizza".
+
 ## 2026-10-24 — Minispelet körning B: sågtandsfart, dubbelhopp, nya hinder med förvarning, "Familjen <Namn>"
 **Motor utan DOM.** Reglerna flyttade från `game.ts` till `src/engine.ts`, så att botarna kan spela hela spel i Node (≈1 s per spel i stället för 4 min i webbläsaren). Allt räknas exakt ur speltiden: sträcka, hinders läge och gubbens höjd. Spel, utplacering och botar ser därför samma värld. `game.ts` ritar och tar emot tryck. Inmatnings- och scrollkoden är oförändrad. Testerna kräver nu `esbuild` som uttryckligt utvecklingsberoende, för att paketera webbläsarboten.
 

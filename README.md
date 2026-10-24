@@ -9,7 +9,7 @@ Mobilanpassad, ensidig inbjudningssida till Vilgots 10-årskalas (gamingkalas). 
 | Titelskärm (`#intro`) | Porträtt, titel, PRESS START (länk till När), HUD och mark | Porträttet: solglasögon → krona → av. Hjärtana uppe till vänster: varje tryck tar ett liv ("OUCH!"), vid noll "GAME OVER?", nästa tryck "EXTRA LIFE!". Blocket i marken: sprickor, splitter, ett mynt räknas i myntverket uppe till höger, nytt block efter 3 s |
 | När (`#act-when`) | Datum, tid, nedräkning som mynträkneverk | – |
 | Var (`#act-where`) | Skylt och skattkista | Skylten vecklar ut en skattkarta med adress och kartlänkar. Kistan öppnas med ett regn av pixelmynt |
-| Vad händer (`#act-program`) | Gaming, snacks, ta med (egen ruta) | – |
+| Vad händer (`#act-program`) | Gaming, pizza, snacks, ta med (egen ruta) | Pizzabiten: tryck = tugga ("Ta en tugga!" → "Mums!" → "En till?" → "Bara kanten kvar…"), fjärde trycket ger en ny bit. Tuggorna raderar hela pixlar genom en SVG-mask (`initPizza` i src/main.ts) |
 | Bonus level (`#act-bonus`) | Minispel i `<canvas>` (src/game.ts, src/engine.ts) och topplistan under det | Tryck startar, tryck = hopp, ett tryck till i luften = dubbelhopp. Fyra miljöer med egna hinder. Tre liv. Under spelet: utfällbar "HIGH SCORE"-panel med den delade topplistan |
 | OSA (`#act-rsvp`) | Formuläret | Ja ger pixelkonfetti och "LEVEL UP!" |
 | High score (`#act-outro`) | "Vilgot – 10 år" och "Du?" (statisk dekoration, ingen koppling till topplistan) | Ljud av/på |

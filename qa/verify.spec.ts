@@ -484,6 +484,47 @@ test.describe("Tap interactions", () => {
     expect(errors).toEqual([]);
   });
 
+  test("pizza: three bites erase pixels through a mask, fourth tap resets", async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto("/");
+    await page.waitForLoadState("networkidle");
+    await page.locator("#beat-pizza").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(1200);
+    const btn = page.locator("#btn-pizza");
+    const label = page.locator("#pizza-label");
+    await expect(label).toHaveText("Ta en tugga!");
+    // Tuggorna är svarta pixlar i en mask över bitens pixlar – inget ritas ovanpå
+    const state = () =>
+      page.$eval("#btn-pizza svg", (svg) => ({
+        masked: svg.querySelector("g[mask='url(#bite-mask)'] path") !== null,
+        holes: svg.querySelectorAll("mask g rect").length,
+        outside: svg.querySelectorAll(":scope > rect, :scope > path").length,
+      }));
+    expect(await state()).toEqual({ masked: true, holes: 0, outside: 0 });
+
+    const holes: number[] = [];
+    for (const text of ["Mums!", "En till?", "Bara kanten kvar…"]) {
+      await btn.tap();
+      await expect(label).toHaveText(text);
+      holes.push((await state()).holes);
+    }
+    expect(holes[0]).toBeGreaterThan(0);
+    expect(holes[1]).toBeGreaterThan(holes[0]);
+    expect(holes[2]).toBeGreaterThan(holes[1]);
+    await expect(btn).toHaveAttribute("data-bites", "3");
+    // Kanten (rad 13–15) finns kvar efter tre tuggor
+    const crust = await page.$$eval("#btn-pizza mask g rect", (r) => r.filter((e) => Number(e.getAttribute("y")) >= 13).length);
+    expect(crust).toBe(0);
+    await page.waitForTimeout(300);
+    await page.locator("#beat-pizza").screenshot({ path: path.join(QA_DIR, "screenshot-pizza-tuggad.png") });
+
+    await btn.tap(); // fjärde trycket: ny bit
+    await expect(label).toHaveText("Ta en tugga!");
+    expect((await state()).holes).toBe(0);
+    await page.locator("#beat-pizza").screenshot({ path: path.join(QA_DIR, "screenshot-pizza.png") });
+    expect(errors).toEqual([]);
+  });
+
   test("hearts: three ouches, GAME OVER?, then EXTRA LIFE!", async ({ page }) => {
     const errors = trackErrors(page);
     await page.goto("/");
@@ -585,6 +626,11 @@ test.describe("Synthesized 8-bit sounds", () => {
     await page.locator("#signpost").tap();
     await page.locator("#btn-chest").tap();
     await expect.poll(() => since(n)).toEqual(["blip", "chest"]);
+
+    await page.locator("#beat-pizza").scrollIntoViewIfNeeded();
+    n = (await sfx()).length;
+    for (let i = 0; i < 4; i++) await page.locator("#btn-pizza").tap();
+    await expect.poll(() => since(n)).toEqual(["crunch", "crunch", "crunch", "blip"]);
 
     // OSA ja = level up (Formspree mockas i beforeEach)
     await page.locator("#field-name").fill("Testbarn");
@@ -734,9 +780,10 @@ test.describe("Resilience (no JS, init crash, blocked script)", () => {
     ["#main-title", "Vilgot fyller 10!"],
     ["#party-kind", "gamingkalas"],
     ["#when-date", "Fredag 20 november"],
-    ["#when-time", "Kl 18:00 – 20:30"],
+    ["#when-time", "Kl 17:00 – 19:30"],
     ["#address-street", "Kardemummagränd 20"],
     ["#beat-gaming-text", "Gaming tillsammans"],
+    ["#beat-pizza-text", "Pizza"],
     ["#beat-snacks-text", "Snacks och tilltugg"],
     ["#beat-tempo-text", "Högt tempo, låg ljudnivå – kanske"],
     ["#bring-text", "Egen padda eller mobil"],

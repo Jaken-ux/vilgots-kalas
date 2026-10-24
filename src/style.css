@@ -756,6 +756,16 @@ h1, h2, .act-title {
   visibility: visible;
 }
 
+/* Pizzans text ("Ta en tugga!" …): bara med JS, utan JS går det inte att tugga */
+.tap-label {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  margin-top: 0.4rem;
+}
+html:not(.js) .tap-label {
+  display: none;
+}
+
 .tap-hint {
   font-size: 0.85rem;
   color: var(--text-dim);

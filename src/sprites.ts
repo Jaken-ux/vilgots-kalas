@@ -116,6 +116,26 @@ export const SPRITES: Record<string, string[]> = {
     "kSSSSSSSwSSSSSSk",
     "kkkkkkkkkkkkkkkk",
   ],
+  // Pizzabit (16×16): spetsen uppåt, kanten nedtill. Tuggorna i main.ts
+  // (initPizza) maskar bort hela pixlar.
+  pizza: [
+    ".......kk.......",
+    ".......kk.......",
+    "......kyyk......",
+    "......kyok......",
+    ".....koyyyk.....",
+    ".....kyRryk.....",
+    "....kyyrroyk....",
+    "....kyyoyyyk....",
+    "...kyoyyyyRrk...",
+    "...kyrRyyyrrk...",
+    "..kyyRryoyyyyk..",
+    "..kyyyoyyyyyyk..",
+    ".kyyoyyyyyyoyyk.",
+    "keeeeeeeeeeeeeek",
+    "khhhhhhhhhhhhhhk",
+    ".kkkkkkkkkkkkkk.",
+  ],
   snacks: [
     "....y..yy.y...",
     "..yyoyyoyyyy..",
