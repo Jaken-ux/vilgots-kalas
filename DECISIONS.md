@@ -2,6 +2,9 @@
 
 Nyast överst. Projektet är en kopia av Livias kalas. Posterna före 2026-10-23 kommer därifrån och gäller den ärvda koden.
 
+## 2026-10-24 — Pizzan först i Vad händer
+Pizzan ligger nu först, före Gaming, med rubriken "Det bjuds på pizza!" (första posten i `content.party.program`). Detta ersätter ordningen i posten "Ny tid 17:00–19:30, pizza i programmet", där pizzan låg efter Gaming. Tugg-interaktionen och texterna är oförändrade. Verifiering, lätt nivå: bygg, berörda tester 6/6 och en skärmdump. Commit: "Pizza first".
+
 ## 2026-10-24 — Outron utan lista, topplistan utfälld som standard
 **Outron:** listan "Vilgot – 10 år" / "Du?" och rubriken "High score" är borttagna.
 - Kvar: "Vi ses den 20:e!" och ljudknappen och "Till start" (Jacob valde båda; länktexten är oförändrad).
