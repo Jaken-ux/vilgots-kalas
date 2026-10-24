@@ -64,8 +64,6 @@ export function staticText(c = content): Record<string, string> {
     "gifts-line": p.gifts ?? "",
     "contact-line": p.contact ?? "",
     "rsvp-deadline": c.rsvp.deadlineText,
-    "hs-name": c.child.name,
-    "hs-score": `${c.child.age} år`,
     "outro-see-you": seeYouText(c),
   };
 }

@@ -12,7 +12,7 @@ Mobilanpassad, ensidig inbjudningssida till Vilgots 10-årskalas (gamingkalas). 
 | Vad händer (`#act-program`) | Gaming, pizza, snacks, ta med (egen ruta) | Pizzabiten (står i en egen kolumn med fast bredd, så att den inte flyttar sig när texten byts): tryck = tugga ("Ta en tugga!" → "Mums!" → "En till?" → "Bara kanten kvar…"), fjärde trycket ger en ny bit. Tuggorna raderar hela pixlar genom en SVG-mask (`initPizza` i src/main.ts) |
 | Bonus level (`#act-bonus`) | Minispel i `<canvas>` (src/game.ts, src/engine.ts) och topplistan under det | Tryck startar, tryck = hopp, ett tryck till i luften = dubbelhopp. Fyra miljöer med egna hinder. Tre liv. Under spelet: utfällbar "HIGH SCORE"-panel med den delade topplistan |
 | OSA (`#act-rsvp`) | Formuläret | Ja ger pixelkonfetti och "LEVEL UP!" |
-| High score (`#act-outro`) | "Vilgot – 10 år" och "Du?" (statisk dekoration, ingen koppling till topplistan) | Ljud av/på |
+| Outro (`#act-outro`) | Handkontroll, "Vi ses den 20:e!", ljudknapp och "Till start" | Ljud av/på |
 
 ## Köra lokalt
 
@@ -124,11 +124,11 @@ Minispelet har en delad topplista i Firebase Realtime Database under `/scores/<g
 - **Visningsnamn.** Överallt på topplistan står "Familjen <Namn>" (listan, game over-skärmen och frågan). Databasnyckeln och det sparade namnet är fortfarande bara gästnamnet. Är raden på game over-skärmen för lång blir det "Fam. <Namn>".
 - **När frågan visas.** Frågan kommer när poängen slår gästens plats på listan och är högst hittills i sessionen. Ett nej frågas alltså inte om igen för en lägre poäng.
 - **Topplistan ligger direkt under spelet** som en utfällbar panel (`#board`). Rubriken "HIGH SCORE" med en pixelpil syns alltid och växlar färg i pixelsteg. Ett tryck fäller ut listan: topp 10, egen rad markerad, egen placering under om den är längre ner, och webbläsarens eget rekord sist.
-  - Utfällt läge sparas i `localStorage` (`vilgots-kalas-board-open`).
+  - Listan är utfälld som standard. Fäller gästen själv ihop (eller ut) den sparas läget i `localStorage` (`vilgots-kalas-board-open`) och gäller sedan.
   - När en poäng har postats fälls listan ut av sig själv, och den egna raden scrollas fram om den inte syns.
   - Tar någon förstaplatsen spelas en fanfar och "NEW HIGH SCORE!" visas.
   - Panelen syns bara med JS.
-- **Outron** ("Vilgot – 10 år", "Du?") är statisk dekoration utan koppling till Firebase.
+- **Outron** har ingen lista, bara "Vi ses den 20:e!" och knapparna.
 - **På game over-skärmen** visas topp 3 och den egna placeringen.
 - **Laddning.** Firebase laddas först vid första spelstart eller när Bonus level-sektionen syns, aldrig vid sidladdning. Firebase-chunken är 223,5 kB (49,5 kB gzip), och huvudbundlen växte med 5,6 kB.
 - **Fel.** Svarar Firebase inte inom 5 s, eller nekar, visar panelen "Topplistan svarar inte just nu" och det lokala rekordet. Inget kraschar.

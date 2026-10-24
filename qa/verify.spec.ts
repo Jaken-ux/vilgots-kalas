@@ -99,7 +99,7 @@ test.describe("Definition of Done", () => {
     const checks = [
       ".title", ".hud", ".press-start", "#when-box", "#countdown", "#where-scene",
       "#beat-gaming", "#beat-snacks", "#beat-bring", "#act-bonus .act-title", "#game",
-      "#rsvp-form", "#act-outro .hiscore", ".outro-controls",
+      "#rsvp-form", "#act-outro .outro-icon", "#outro-see-you", ".outro-controls",
     ];
     for (const sel of checks) {
       const opacity = await page.locator(sel).evaluate((el) => parseFloat(getComputedStyle(el).opacity));
@@ -303,7 +303,7 @@ test.describe("Definition of Done", () => {
       await page.locator(sel).scrollIntoViewIfNeeded();
       await page.waitForTimeout(400);
     }
-    for (const sel of [".title", "#when-box", "#beat-bring", "#act-outro .hiscore"]) {
+    for (const sel of [".title", "#when-box", "#beat-bring", "#outro-see-you"]) {
       await expect
         .poll(() => page.locator(sel).evaluate((el) => parseFloat(getComputedStyle(el).opacity)))
         .toBeGreaterThanOrEqual(0.95);
@@ -796,8 +796,6 @@ test.describe("Resilience (no JS, init crash, blocked script)", () => {
     ["#beat-tempo-text", "Högt tempo, låg ljudnivå – kanske"],
     ["#bring-text", "Egen padda eller mobil"],
     ["#rsvp-deadline", "Svara senast tisdag 17 november"],
-    ["#hs-name", "Vilgot"],
-    ["#hs-score", "10 år"],
     ["#outro-see-you", "Vi ses den 20:e!"],
   ] as const;
 
@@ -1700,7 +1698,10 @@ test.describe("Topplista (Firebase mockad)", () => {
       a: { name: "Anna", score: 5000, updatedAt: 1 },
       b: { name: "Bo", score: 3, updatedAt: 1 },
     });
+    // Gästen har själv fällt ihop listan: en postning fäller ut den igen
+    await page.addInitScript(() => localStorage.setItem("vilgots-kalas-board-open", "0"));
     const score = await playToGameOver(page, "/?g=Vilgot");
+    await expect(page.locator("#board-list")).toBeHidden();
     await page.locator("#btn-post-yes").tap();
     await expect.poll(() => writes(page)).toEqual([{ key: "vilgot", name: "Vilgot", score }]);
     await expect(page.locator("#board-status")).toContainText(`1. Familjen Anna`);
@@ -1720,10 +1721,8 @@ test.describe("Topplista (Firebase mockad)", () => {
       ["3", "Familjen Bo", "3", false],
     ]);
     await page.locator("#board").screenshot({ path: path.join(QA_DIR, "screenshot-board-list.png") });
-    // Outron är statisk: ingen koppling till topplistan
-    const outro = await page.$$eval("#act-outro .hiscore .hs-name", (n) => n.map((x) => x.textContent));
-    expect(outro).toEqual(["Vilgot", "Du?_"]); // "_" = den blinkande markören
-    await expect(page.locator("#act-outro .hs-me, #act-outro .hs-note")).toHaveCount(0);
+    // Outron har ingen lista längre
+    await expect(page.locator("#act-outro .hiscore, #act-outro .hs-row")).toHaveCount(0);
   });
 
   test("'Posta alltid' is saved per guest and then skips the question", async ({ page }) => {
@@ -1838,33 +1837,37 @@ test.describe("Topplista (Firebase mockad)", () => {
     const toggle = page.locator("#board-toggle");
     await expect(toggle).toBeVisible();
     await expect(toggle).toContainText("High score");
-    await expect(toggle).toHaveAttribute("aria-expanded", "false"); // stängd som standard
-    await expect(page.locator("#board-list")).toBeHidden();
-    await page.locator("#game").scrollIntoViewIfNeeded();
-    await page.waitForTimeout(1200);
-    await page.locator(".game-wrap").screenshot({ path: path.join(QA_DIR, "screenshot-board-closed.png") });
-    await page.locator("#board").screenshot({ path: path.join(QA_DIR, "screenshot-board-header.png") });
-
-    await toggle.click();
+    // Utfälld som standard för den som aldrig fällt ihop den – utan att något sparas
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
     await expect(page.locator("#board-list")).toBeVisible();
     await expect(page.locator("#board-list .hs-me .hs-name")).toHaveText("Familjen Vilgot");
-    expect(await page.evaluate(() => localStorage.getItem("vilgots-kalas-board-open"))).toBe("1");
+    expect(await page.evaluate(() => localStorage.getItem("vilgots-kalas-board-open"))).toBeNull();
+    await page.locator("#game").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(1200);
     await page.locator("#board").screenshot({ path: path.join(QA_DIR, "screenshot-board-open.png") });
 
-    // Kommer ihåg utfällt läge
+    // Fäller man själv ihop den gäller det (sparat), även efter omladdning
+    await toggle.click();
+    await expect(page.locator("#board-list")).toBeHidden();
+    expect(await page.evaluate(() => localStorage.getItem("vilgots-kalas-board-open"))).toBe("0");
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    await expect(page.locator("#board-list")).toBeHidden();
+    await expect(page.locator("#board-toggle")).toHaveAttribute("aria-expanded", "false");
+    await page.locator("#board").screenshot({ path: path.join(QA_DIR, "screenshot-board-header.png") });
+    // ... och utfällt igen likaså
+    await page.locator("#board-toggle").click();
     await page.reload();
     await page.waitForLoadState("networkidle");
     await expect(page.locator("#board-list")).toBeVisible();
-    await page.locator("#board-toggle").click();
-    await expect(page.locator("#board-list")).toBeHidden();
-    expect(await page.evaluate(() => localStorage.getItem("vilgots-kalas-board-open"))).toBe("0");
 
-    // Utan JS: ingen panel (listan kräver JS), outron statisk
+    // Utan JS: ingen panel (listan kräver JS), outron utan lista
     const ctx = await browser.newContext({ javaScriptEnabled: false });
     const p2 = await ctx.newPage();
     await p2.goto("/");
     await expect(p2.locator("#board")).toBeHidden();
-    await expect(p2.locator("#act-outro .hiscore .hs-name").first()).toHaveText("Vilgot");
+    await expect(p2.locator("#outro-see-you")).toHaveText("Vi ses den 20:e!");
+    await expect(p2.locator("#act-outro .hs-row")).toHaveCount(0);
     await ctx.close();
   });
 });

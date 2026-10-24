@@ -1337,11 +1337,18 @@ html:not(.js) .tap-label {
   font-size: min(2rem, 5.8vw);
 }
 
-/* ===== HIGH SCORE ===== */
+/* ===== OUTRO ===== */
+/* Bara handkontroll, "Vi ses den 20:e!" och knapparna: lägre sektion, så att
+   den inte ser tom ut */
 .act-outro {
   background: #05070D;
-  min-height: 70vh;
-  min-height: 70svh;
+  min-height: 50vh;
+  min-height: 50svh;
+}
+
+.outro-icon {
+  display: block;
+  margin: 0 auto 1.6rem;
 }
 
 .credits {
@@ -1351,14 +1358,6 @@ html:not(.js) .tap-label {
 /* Startläge för inanimering – bara när JS kör (se <head> i index.html) */
 .js .credits-line {
   opacity: 0;
-}
-
-.hs-title {
-  font-size: 1.15rem;
-  color: var(--neon);
-  text-shadow: 3px 3px 0 var(--ink);
-  margin-bottom: 1.8rem;
-  animation: rainbow 2.4s steps(1) infinite;
 }
 
 @keyframes rainbow {
@@ -1397,10 +1396,6 @@ html:not(.js) .tap-label {
   flex: 1;
   border-bottom: 4px dotted var(--line);
   transform: translateY(-4px);
-}
-
-.hs-top {
-  color: var(--gold);
 }
 
 /* Namn i gemener/versaler som de stavas: versalt Å/Ä/Ö blir fel i pixelfonten */
@@ -1443,14 +1438,13 @@ html:not(.js) .tap-label {
   color: var(--text);
 }
 
-.hs-cursor {
-  animation: blink 1s steps(1) infinite;
-}
-
 .credits-big {
+  font-family: var(--font-pixel);
   font-size: 1.15rem;
-  font-weight: 700;
-  color: var(--text);
+  line-height: 1.6;
+  color: var(--neon);
+  text-shadow: 3px 3px 0 var(--ink);
+  animation: rainbow 2.4s steps(1) infinite;
 }
 
 .outro-controls {

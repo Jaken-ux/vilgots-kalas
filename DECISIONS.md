@@ -2,6 +2,17 @@
 
 Nyast överst. Projektet är en kopia av Livias kalas. Posterna före 2026-10-23 kommer därifrån och gäller den ärvda koden.
 
+## 2026-10-24 — Outron utan lista, topplistan utfälld som standard
+**Outron:** listan "Vilgot – 10 år" / "Du?" och rubriken "High score" är borttagna.
+- Kvar: "Vi ses den 20:e!" och ljudknappen och "Till start" (Jacob valde båda; länktexten är oförändrad).
+- Så att outron inte ser tom ut: en handkontroll ur sajtens egna sprites ovanför raden, raden i pixelfont med regnbågsväxlingen från den gamla rubriken, och sektionen 50 % av skärmhöjden i stället för 70 %.
+
+**Topplistan under spelet** är utfälld för den som aldrig fällt ihop den. Detta ersätter "stängt som standard" i posten om panelen nedan.
+- Läget sparas bara när gästen själv trycker, inte vid sidladdning.
+- Testet för utfällning efter en postning börjar nu med en ihopfälld lista, så att det fortfarande prövar något.
+
+Verifiering, lätt nivå: bygg, de berörda testerna (topplistan, synlighet, reducerad rörelse, utan JS, bredder), 16/16 gröna, plus skärmdumpar av outron och panelen. Commit: "Remove outro list, expand leaderboard by default".
+
 ## 2026-10-24 — Pizzan står still, mänskligare bot och ny kurva, hjärta per level
 **Pizzan hoppade i sidled.** `.tap-btn` har `margin: 0 auto`, och auto-marginaler i en flexrad delar upp det lediga utrymmet, så pizzan flyttade sig när etiketten bytte längd.
 - Pizzan står nu i en egen kolumn med fast bredd (64 px, `margin: 0`), och etiketten håller alltid en rad med fast höjd.

@@ -26,7 +26,7 @@ export interface Backend {
 export const MAX_SCORE = 99999;
 const TIMEOUT_MS = 5000;
 const AUTO_KEY = "vilgots-kalas-autopost"; // + ":<gäst>", per gäst
-const OPEN_KEY = "vilgots-kalas-board-open"; // utfälld panel, per webbläsare
+const OPEN_KEY = "vilgots-kalas-board-open"; // utfälld panel, per webbläsare (utfälld om inget sparats)
 
 // Gästens nyckel (gemener) och visningsnamn – bara om ?g-namnet finns i gästlistan
 export function guestIdentity(g: string): { key: string; name: string } | null {
@@ -121,10 +121,11 @@ export function initLeaderboard(opts: Options) {
   };
 
   // ----- Utfällbar panel under spelet -----
-  const setOpen = (open: boolean) => {
+  const setOpen = (open: boolean, save = true) => {
     if (!list || !toggle) return;
     list.hidden = !open;
     toggle.setAttribute("aria-expanded", String(open));
+    if (!save) return;
     try {
       localStorage.setItem(OPEN_KEY, open ? "1" : "0");
     } catch {
@@ -133,9 +134,10 @@ export function initLeaderboard(opts: Options) {
   };
   const savedOpen = () => {
     try {
-      return localStorage.getItem(OPEN_KEY) === "1";
+      // Utfälld som standard; ihopfälld bara om gästen själv fällt ihop den
+      return localStorage.getItem(OPEN_KEY) !== "0";
     } catch {
-      return false;
+      return true;
     }
   };
 
@@ -308,7 +310,7 @@ export function initLeaderboard(opts: Options) {
   // Panelen syns bara med JS (topplistan kräver det); utfällt läge från förra gången
   if (board && toggle && list) {
     board.hidden = false;
-    setOpen(savedOpen());
+    setOpen(savedOpen(), false);
     toggle.addEventListener("click", () => setOpen(list.hidden));
     renderList();
   }

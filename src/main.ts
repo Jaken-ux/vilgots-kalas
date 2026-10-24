@@ -191,7 +191,7 @@ function initAnimations() {
     },
   });
 
-  // High score
+  // Outro
   const creditsLines = document.querySelectorAll(".credits-line");
   creditsLines.forEach((line, i) => {
     ScrollTrigger.create({
