@@ -86,6 +86,12 @@ export function scoreLine(rank: number, name: string, score: number) {
   return `${rank}. ${pixelSafe(n.slice(0, room)).padEnd(room)} ${score}`;
 }
 
+// Game over: fråga om poängen slår familjens poäng på listan (0 om familjen
+// inte finns där) och en postning som redan pågår. Ett "Nej" eller webbläsarens
+// lokala rekord påverkar inte – samma regel gäller "Posta alltid".
+export const shouldOffer = (score: number, listed: number | undefined, posting: number) =>
+  score > Math.max(listed ?? 0, posting);
+
 interface Options {
   guest: string; // ?g-namnet (kan vara tomt eller okänt)
   play(sound: "chest"): void;
@@ -108,7 +114,7 @@ export function initLeaderboard(opts: Options) {
   let rows: Row[] = [];
   let topScore: number | null = null; // ettans poäng i förra ögonblicksbilden
   let lastOver: number | null = null; // poängen på game over-skärmen som visas nu
-  let offered = 0; // högsta poäng vi frågat om den här sessionen
+  let posting = 0; // högsta poäng som postats den här sessionen (listan kan släpa efter)
   let postFailed = false;
   let game: { info(l: InfoLine[]): void; hold(on: boolean): void } | null = null;
 
@@ -271,12 +277,14 @@ export function initLeaderboard(opts: Options) {
 
   const post = async (score: number) => {
     if (!me || !backend) return;
+    posting = Math.max(posting, score);
     postFailed = false;
     let posted = false;
     try {
       posted = await withTimeout(backend.post(me.key, { name: me.name, score: Math.min(score, MAX_SCORE) }));
     } catch {
       postFailed = true; // nekad, nätet nere eller timeout: lokalt rekord gäller
+      posting = 0;
     }
     renderInfo();
     if (!posted) return;
@@ -339,8 +347,7 @@ export function initLeaderboard(opts: Options) {
       renderInfo();
       if (!me || status !== "ok" || !panel) return;
       const mine = rows.find((r) => r.key === me.key);
-      if (score <= (mine?.score ?? 0) || score <= offered) return;
-      offered = score;
+      if (!shouldOffer(score, mine?.score, posting)) return;
       if (autoPost()) return void post(score);
       const title = document.getElementById("game-panel-title");
       if (title) title.textContent = `Nytt rekord! Posta ${family(genitive(me.name))} rekord?`;

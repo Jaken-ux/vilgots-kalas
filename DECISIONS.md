@@ -2,6 +2,11 @@
 
 Nyast överst. Projektet är en kopia av Livias kalas. Posterna före 2026-10-23 kommer därifrån och gäller den ärvda koden.
 
+## 2026-10-28 — Postfrågan styrs bara av familjens poäng på listan
+Frågan jämförde redan med listan, men en spärr för sessionen (`offered`, högsta poäng vi frågat om) gjorde att ett "Nej" på 900 stoppade frågan för 800 med listan på 600. Spärren är borttagen. Regeln ligger i `shouldOffer()` i src/leaderboard.ts: fråga om poängen slår familjens poäng på listan (0 om familjen saknas) och en postning som pågår. Den sista delen hindrar "Posta alltid" från att posta två gånger innan listan hunnit uppdateras. Det lokala rekordet visas som "Ditt rekord" men styr inte.
+- Förkastat: fråga mot det lokala rekordet när listan inte svarar. Jacob valde att behålla "ingen fråga", eftersom en postning ändå skulle misslyckas.
+- Test: exakta tal mot `shouldOffer()`, plus ett webbläsartest (Nej, lägre omgång med ett liv → fråga, listan över → ingen fråga). Med den gamla spärren föll testet.
+
 ## 2026-10-24 — iOS-ljud: inga oscillatorer innan kontexten kör
 Ljudet var tyst på iPhone men inte i Livias kalas. Granskat i ordning: kontexten skapas redan först i ett tryck med `resume()` i samma tryck, och den tysta buffern fanns redan. Mute läses som `=== "true"` och knappen läser samma variabel. Enda skillnaden mot Livias: där spelas första ljudet först när filerna laddats, och kontexten kör då. Här skapades oscillatorerna direkt i trycket, när iOS-kontexten ännu var `suspended` och `currentTime` stod på 0.
 - Nu: `playSound()` spelar direkt bara om state är `running`, annars när `resume()` är klar (inom 0,5 s, samma gräns som Livias).

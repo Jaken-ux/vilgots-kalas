@@ -6,7 +6,7 @@ import { vAt, levelStart, density, hazard, plan, samples, fy, xAt, LEVEL_SECONDS
 import { simulate, type RunResult } from "./bots";
 import { buildSync } from "esbuild";
 import { ENVS } from "../src/levels";
-import { ranking, guestIdentity, pixelSafe, family, genitive, scoreLine, NO_LINK } from "../src/leaderboard";
+import { ranking, guestIdentity, pixelSafe, family, genitive, scoreLine, NO_LINK, shouldOffer } from "../src/leaderboard";
 import { content } from "../src/content";
 // @ts-expect-error – .mjs utan typer
 import { buildRules, smsLinks, withSmsLinks } from "../scripts/gen-rules.mjs";
@@ -1644,6 +1644,17 @@ test.describe("Topplista (Firebase mockad)", () => {
     expect(pixelSafe("Vilgot")).toBe("Vilgot");
     expect(ranking(null)).toEqual([]);
 
+    // Frågan styrs av familjens poäng på listan, inte av ett tidigare "Nej" eller
+    // det lokala rekordet: Nej på 900, sedan 800 med listan på 600 → fråga;
+    // 500 med listan på 600 → ingen fråga. Saknas familjen på listan räknas 0.
+    expect(shouldOffer(800, 600, 0)).toBe(true);
+    expect(shouldOffer(500, 600, 0)).toBe(false);
+    expect(shouldOffer(600, 600, 0)).toBe(false);
+    expect(shouldOffer(1, undefined, 0)).toBe(true);
+    expect(shouldOffer(0, undefined, 0)).toBe(false);
+    // En postning som pågår (listan har inte hunnit uppdateras) räknas som postad
+    expect(shouldOffer(800, 600, 900)).toBe(false);
+
     const r = buildRules(["Vilgot"]).rules.scores.$name;
     expect(r[".write"]).toBe("($name === 'vilgot') && newData.exists()");
     expect(r[".write"]).not.toContain("emma");
@@ -1712,6 +1723,47 @@ test.describe("Topplista (Firebase mockad)", () => {
     await page.waitForTimeout(500);
     expect(await writes(page)).toEqual([]);
     expect(firebaseCalls).toBe(0);
+  });
+
+  test("after 'Nej' a lower score still asks when it beats the list; no question below the list", async ({ page }) => {
+    // __eng: motorn för pågående omgång. Ett enda liv ger en kortare omgång
+    // och därmed lägre poäng än den första (tre liv).
+    await page.addInitScript(() => {
+      const w = window as any;
+      w.__gameHook = (api: { engine: () => unknown }) => (w.__eng = api.engine);
+    });
+    await fakeBoard(page, {});
+    const first = await playToGameOver(page, "/?g=Vilgot");
+    await expect(panel(page)).toBeVisible();
+    await page.locator("#btn-post-no").tap();
+    await expect(panel(page)).toBeHidden();
+
+    const oneLifeRun = async () => {
+      await page.waitForTimeout(800); // förbi omstartsspärren
+      await page.locator("#game").tap();
+      await expect.poll(() => page.getAttribute("#game", "data-state")).toBe("run");
+      await page.evaluate(() => ((window as any).__eng().lives = 1));
+      await expect.poll(() => page.getAttribute("#game", "data-state"), { timeout: 20000 }).toBe("over");
+      return Number(await page.getAttribute("#game", "data-score"));
+    };
+
+    // Listan under den nya poängen: frågan visas, trots "Nej" på en högre poäng.
+    await page.evaluate(() => (window as any).__pushScores({ vilgot: { name: "Vilgot", score: 1, updatedAt: 1 } }));
+    const second = await oneLifeRun();
+    expect(second).toBeLessThan(first);
+    expect(second).toBeGreaterThan(1);
+    await expect(panel(page)).toBeVisible();
+    // Det lokala rekordet visas fortfarande, men styrde inte frågan
+    await expect(page.locator("#board-list .hs-local")).toHaveText(`Ditt rekord: ${first}`);
+    await page.locator("#btn-post-no").tap();
+    await expect(panel(page)).toBeHidden();
+
+    // Listan över poängen: ingen fråga
+    await page.evaluate(() => (window as any).__pushScores({ vilgot: { name: "Vilgot", score: 99999, updatedAt: 1 } }));
+    await oneLifeRun();
+    await page.waitForTimeout(300);
+    await expect(panel(page)).toBeHidden();
+    expect(await writes(page)).toEqual([]);
   });
 
   test("'Ja!' writes the score; never lowers a higher score on the list", async ({ page }) => {
